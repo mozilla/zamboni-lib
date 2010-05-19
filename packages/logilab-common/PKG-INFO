@@ -1,0 +1,24 @@
+Metadata-Version: 1.0
+Name: logilab-common
+Version: 0.50.1
+Summary: useful miscellaneous modules used by Logilab projects
+Home-page: http://www.logilab.org/project/logilab-common
+Author: Logilab
+Author-email: devel@logilab.fr
+License: LGPL
+Description: logilab-common is a collection of low-level Python packages and modules,
+        designed to ease:
+        * handling command line options and configuration files
+        * writing interactive command line tools
+        * manipulation files and character strings
+        * interfacing to OmniORB
+        * generating SQL queries
+        * running unit tests
+        * manipulating tree structures
+        * accessing RDBMS (currently postgreSQL, mysql and sqlite)
+        * generating text and HTML reports
+        * logging
+        * parsing XML processing instructions
+        * more...
+        
+Platform: UNKNOWN

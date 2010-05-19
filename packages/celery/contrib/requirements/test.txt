@@ -1,0 +1,10 @@
+unittest2
+simplejson
+nose
+nose-cover3
+django-nose
+coverage>=3.0
+pytyrant
+redis
+pymongo
+git+git://github.com/exogen/nose-achievements.git

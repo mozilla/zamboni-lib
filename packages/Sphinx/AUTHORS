@@ -1,0 +1,33 @@
+Sphinx is written and maintained by Georg Brandl <georg@python.org>.
+
+Substantial parts of the templates were written by Armin Ronacher
+<armin.ronacher@active-4.com>.
+
+Other contributors, listed alphabetically, are:
+
+* Daniel Bültmann -- todo extension
+* Michael Droettboom -- inheritance_diagram extension
+* Charles Duffy -- original graphviz extension
+* Josip Dzolonga -- coverage builder
+* Horst Gutmann -- internationalization support
+* Martin Hans -- autodoc improvements
+* Dave Kuhlman -- original LaTeX writer
+* Thomas Lamb -- linkcheck builder
+* Will Maier -- directory HTML builder
+* Christopher Perkins -- autosummary integration
+* Benjamin Peterson -- unittests
+* Stefan Seefeld -- toctree improvements
+* Antonio Valentino -- qthelp builder
+* Pauli Virtanen -- autodoc improvements, autosummary extension
+* Stefan van der Walt -- autosummary extension
+* Sebastian Wiesner -- image handling, distutils support
+
+Many thanks for all contributions!
+
+There are also a few modules or functions incorporated from other
+authors and projects:
+
+* sphinx.util.jsdump uses the basestring encoding from simplejson,
+  written by Bob Ippolito, released under the MIT license
+* sphinx.util.stemmer was written by Vivake Gupta, placed in the
+  Public Domain
