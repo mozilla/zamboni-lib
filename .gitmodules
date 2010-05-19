@@ -1,0 +1,54 @@
+[submodule "src/bleach"]
+	path = src/bleach
+	url = git://github.com/jsocol/bleach.git
+[submodule "src/cache-panel"]
+	path = src/cache-panel
+	url = git://github.com/jbalogh/django-debug-cache-panel.git
+[submodule "src/check"]
+	path = src/check
+	url = git://github.com/jbalogh/check.git
+[submodule "src/commonware"]
+	path = src/commonware
+	url = git://github.com/jsocol/commonware.git
+[submodule "src/django"]
+	path = src/django
+	url = git://github.com/django/django.git
+[submodule "src/django-cache-machine"]
+	path = src/django-cache-machine
+	url = git://github.com/jbalogh/django-cache-machine.git
+[submodule "src/django-debug-toolbar"]
+	path = src/django-debug-toolbar
+	url = git://github.com/robhudson/django-debug-toolbar.git
+[submodule "src/django-devserver"]
+	path = src/django-devserver
+	url = git://github.com/dcramer/django-devserver.git
+[submodule "src/django-extensions"]
+	path = src/django-extensions
+	url = git://github.com/django-extensions/django-extensions.git
+[submodule "src/django-fixture-magic"]
+	path = src/django-fixture-magic
+	url = git://github.com/davedash/django-fixture-magic.git
+[submodule "src/django-multidb-router"]
+	path = src/django-multidb-router
+	url = git://github.com/jbalogh/django-multidb-router.git
+[submodule "src/django-nose"]
+	path = src/django-nose
+	url = git://github.com/jbalogh/django-nose.git
+[submodule "src/django-queryset-transform"]
+	path = src/django-queryset-transform
+	url = git://github.com/jbalogh/django-queryset-transform.git
+[submodule "src/jingo"]
+	path = src/jingo
+	url = git://github.com/jbalogh/jingo.git
+[submodule "src/jingo-minify"]
+	path = src/jingo-minify
+	url = git://github.com/jsocol/jingo-minify.git
+[submodule "src/schematic"]
+	path = src/schematic
+	url = git://github.com/jbalogh/schematic.git
+[submodule "src/test-utils"]
+	path = src/test-utils
+	url = git://github.com/jbalogh/test-utils.git
+[submodule "src/tower"]
+	path = src/tower
+	url = git://github.com/clouserw/tower.git
