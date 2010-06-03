@@ -9,7 +9,7 @@ packages/django-picklefield
 packages/django-pylibmc
 packages/docutils
 packages/Fabric
-packages/GitPython
+packages/GitPython/lib
 packages/html5lib/src
 packages/importlib
 packages/ipython
