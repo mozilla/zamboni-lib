@@ -5,7 +5,7 @@ packages/billiard
 packages/carrot
 packages/celery
 packages/coverage
-packages/django-picklefield
+packages/django-picklefield/src
 packages/django-pylibmc
 packages/docutils
 packages/Fabric
