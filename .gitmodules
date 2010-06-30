@@ -37,6 +37,9 @@
 [submodule "src/django-queryset-transform"]
 	path = src/django-queryset-transform
 	url = git://github.com/jbalogh/django-queryset-transform.git
+[submodule "src/hera"]
+	path = src/hera
+	url = git://github.com/clouserw/hera.git
 [submodule "src/jingo"]
 	path = src/jingo
 	url = git://github.com/jbalogh/jingo.git
