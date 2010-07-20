@@ -55,6 +55,3 @@
 [submodule "src/tower"]
 	path = src/tower
 	url = git://github.com/clouserw/tower.git
-[submodule "src/twitter-text-python"]
-	path = src/twitter-text-python
-	url = git://github.com/abuchanan/twitter-text-python.git
