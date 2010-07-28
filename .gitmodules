@@ -55,3 +55,6 @@
 [submodule "src/tower"]
 	path = src/tower
 	url = git://github.com/clouserw/tower.git
+[submodule "src/easy-thumbnails"]
+	path = src/easy-thumbnails
+	url = git://github.com/SmileyChris/easy-thumbnails.git
