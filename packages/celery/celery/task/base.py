@@ -295,11 +295,7 @@ class Task(object):
 
 
         """
-        try:
-            return apply_async(self, args, kwargs, **options)
-        except Exception, e:
-            import logging
-            logging.getLogger('z.celery').error('CELERY FAIL: %s' % e)
+        return apply_async(self, args, kwargs, **options)
 
     @classmethod
     def retry(self, args=None, kwargs=None, exc=None, throw=True, **options):
