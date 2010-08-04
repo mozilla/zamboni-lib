@@ -1,4 +1,5 @@
-packages/Jinja2/
-packages/MySQL-python/
-packages/lxml/
-packages/pylibmc/
+*.py[co]
+*.sw[po]
+.coverage
+pip-log.txt
+.DS_Store
