@@ -59,6 +59,7 @@ class _AbstractTransport(object):
         except socket.error:
             self.sock.close()
             raise
+        self.sock.settimeout(None)
 
         self._setup_transport()
 
