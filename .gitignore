@@ -3,3 +3,5 @@
 .coverage
 pip-log.txt
 .DS_Store
+lxml
+pylibmc
