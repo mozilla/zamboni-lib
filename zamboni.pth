@@ -54,6 +54,7 @@ src/django-multidb-router
 src/django-nose
 src/django-queryset-transform
 src/easy-thumbnails
+src/happyforms
 src/hera
 src/jingo
 src/jingo-minify
