@@ -58,3 +58,6 @@
 [submodule "src/easy-thumbnails"]
 	path = src/easy-thumbnails
 	url = git://github.com/SmileyChris/easy-thumbnails.git
+[submodule "src/happyforms"]
+	path = src/happyforms
+	url = git://github.com/mozilla/happyforms.git
