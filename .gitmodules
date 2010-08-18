@@ -61,3 +61,6 @@
 [submodule "src/happyforms"]
 	path = src/happyforms
 	url = git://github.com/mozilla/happyforms.git
+[submodule "src/django-recaptcha"]
+	path = src/django-recaptcha
+	url = git://github.com/mozilla/django-recaptcha.git
