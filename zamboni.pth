@@ -32,7 +32,6 @@ packages/python-dateutil
 packages/python-memcached
 packages/pytz
 packages/recaptcha-client
-packages/redis
 packages/selenium/src
 packages/setuptools
 packages/South
@@ -60,6 +59,7 @@ src/happyforms
 src/hera
 src/jingo
 src/jingo-minify
+src/redis
 src/schematic
 src/test-utils
 src/tower

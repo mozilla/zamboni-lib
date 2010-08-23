@@ -64,3 +64,6 @@
 [submodule "src/django-recaptcha"]
 	path = src/django-recaptcha
 	url = git://github.com/mozilla/django-recaptcha.git
+[submodule "src/redis"]
+	path = src/redis
+	url = git://github.com/jbalogh/redis-py
