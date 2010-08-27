@@ -67,3 +67,9 @@
 [submodule "src/redis"]
 	path = src/redis
 	url = git://github.com/jbalogh/redis-py
+[submodule "src/django-piston"]
+	path = src/django-piston
+	url = git://github.com/mozilla/django-piston.git
+[submodule "src/python-oauth2"]
+	path = src/python-oauth2
+	url = git://github.com/simplegeo/python-oauth2.git
