@@ -11,6 +11,7 @@ packages/docutils
 packages/Fabric
 packages/GitPython/lib
 packages/html5lib/src
+packages/httplib2/python2
 packages/importlib
 packages/ipython
 packages/Jinja2
@@ -59,6 +60,7 @@ src/happyforms
 src/hera
 src/jingo
 src/jingo-minify
+src/python-oauth2
 src/redis
 src/schematic
 src/test-utils
