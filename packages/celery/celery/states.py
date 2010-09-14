@@ -1,8 +1,15 @@
-""" Task States
+"""
+
+States
+------
 
 .. data:: PENDING
 
     Task is waiting for execution or unknown.
+
+.. data:: STARTED
+
+    Task has been started.
 
 .. data:: SUCCESS
 
@@ -16,14 +23,13 @@
 
     Task is being retried.
 
-"""
-PENDING = "PENDING"
-SUCCESS = "SUCCESS"
-FAILURE = "FAILURE"
-RETRY = "RETRY"
+.. data:: REVOKED
 
+    Task has been revoked.
 
-"""
+Sets
+----
+
 .. data:: READY_STATES
 
     Set of states meaning the task result is ready (has been executed).
@@ -36,13 +42,25 @@ RETRY = "RETRY"
 
     Set of states meaning the task returned an exception.
 
+.. data:: PROPAGATE_STATES
+
+    Set of exception states that should propagate exceptions to the user.
+
 .. data:: ALL_STATES
 
     Set of all possible states.
 
 """
-READY_STATES = frozenset([SUCCESS, FAILURE])
-UNREADY_STATES = frozenset([PENDING, RETRY])
-EXCEPTION_STATES = frozenset([RETRY, FAILURE])
+PENDING = "PENDING"
+STARTED = "STARTED"
+SUCCESS = "SUCCESS"
+FAILURE = "FAILURE"
+REVOKED = "REVOKED"
+RETRY = "RETRY"
 
-ALL_STATES = frozenset([PENDING, SUCCESS, FAILURE, RETRY])
+READY_STATES = frozenset([SUCCESS, FAILURE, REVOKED])
+UNREADY_STATES = frozenset([PENDING, STARTED, RETRY])
+EXCEPTION_STATES = frozenset([RETRY, FAILURE, REVOKED])
+PROPAGATE_STATES = frozenset([FAILURE, REVOKED])
+
+ALL_STATES = frozenset([PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED])

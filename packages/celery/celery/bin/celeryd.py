@@ -26,6 +26,12 @@
     Also run the ``celerybeat`` periodic task scheduler. Please note that
     there must only be one instance of this service.
 
+.. cmdoption:: -Q, queues
+
+    List of queues to enable for this worker separated by comma.
+    By default all configured queues are enabled.
+    Example: ``-Q video,image``
+
 .. cmdoption:: -s, --schedule
 
     Path to the schedule database if running with the ``-B`` option.
@@ -36,11 +42,24 @@
 
     Send events that can be captured by monitors like ``celerymon``.
 
-.. cmdoption:: --discard
+.. cmdoption:: --purge, --discard
 
     Discard all waiting tasks before the daemon is started.
     **WARNING**: This is unrecoverable, and the tasks will be
     deleted from the messaging server.
+
+.. cmdoption:: --time-limit
+
+    Enables a hard time limit (in seconds) for tasks.
+
+.. cmdoption:: --soft-time-limit
+
+    Enables a soft time limit (in seconds) for tasks.
+
+.. cmdoption:: --maxtasksperchild
+
+    Maximum number of tasks a pool worker can execute before it's
+    terminated and replaced by a new worker.
 
 """
 import os
@@ -48,19 +67,23 @@ import sys
 import socket
 import logging
 import optparse
+import platform as _platform
 import warnings
-import traceback
 import multiprocessing
 
 import celery
 from celery import conf
 from celery import signals
 from celery import platform
-from celery.log import emergency_error
 from celery.task import discard_all
 from celery.utils import info
 from celery.utils import get_full_cls_name
 from celery.worker import WorkController
+from celery.exceptions import ImproperlyConfigured
+from celery.routes import Router
+
+SYSTEM = _platform.system()
+IS_OSX = SYSTEM == "Darwin"
 
 STARTUP_INFO_FMT = """
 Configuration ->
@@ -77,12 +100,21 @@ Configuration ->
 
 TASK_LIST_FMT = """    . tasks ->\n%s"""
 
+
+def dump_version(*args):
+    print("celeryd v%s" % celery.__version__)
+    sys.exit(0)
+
+
 OPTION_LIST = (
     optparse.make_option('-c', '--concurrency',
             default=conf.CELERYD_CONCURRENCY,
             action="store", dest="concurrency", type="int",
             help="Number of child processes processing the queue."),
-    optparse.make_option('--discard', default=False,
+    optparse.make_option('-V', '--version',
+            action="callback", callback=dump_version,
+            help="Show version information and exit."),
+    optparse.make_option('--purge', '--discard', default=False,
             action="store_true", dest="discard",
             help="Discard all waiting tasks before the server is started. "
                  "WARNING: This is unrecoverable, and the tasks will be "
@@ -107,19 +139,46 @@ OPTION_LIST = (
                     option. The extension '.db' will be appended to the \
                     filename. Default: %s" % (
                     conf.CELERYBEAT_SCHEDULE_FILENAME)),
+    optparse.make_option('-S', '--statedb', default=conf.CELERYD_STATE_DB,
+            action="store", dest="db",
+            help="Path to the state database. The extension '.db' will \
+                 be appended to the filename. Default: %s" % (
+                     conf.CELERYD_STATE_DB)),
     optparse.make_option('-E', '--events', default=conf.SEND_EVENTS,
             action="store_true", dest="events",
             help="Send events so celery can be monitored by e.g. celerymon."),
+    optparse.make_option('--time-limit',
+            default=conf.CELERYD_TASK_TIME_LIMIT,
+            action="store", type="int", dest="task_time_limit",
+            help="Enables a hard time limit (in seconds) for tasks."),
+    optparse.make_option('--soft-time-limit',
+            default=conf.CELERYD_TASK_SOFT_TIME_LIMIT,
+            action="store", type="int", dest="task_soft_time_limit",
+            help="Enables a soft time limit (in seconds) for tasks."),
+    optparse.make_option('--maxtasksperchild',
+            default=conf.CELERYD_MAX_TASKS_PER_CHILD,
+            action="store", type="int", dest="max_tasks_per_child",
+            help="Maximum number of tasks a pool worker can execute"
+                 "before it's terminated and replaced by a new worker."),
+    optparse.make_option('--queues', '-Q', default=[],
+            action="store", dest="queues",
+            help="Comma separated list of queues to enable for this worker. "
+                 "By default all configured queues are enabled. "
+                 "Example: -Q video,image"),
 )
 
 
 class Worker(object):
+    WorkController = WorkController
 
     def __init__(self, concurrency=conf.CELERYD_CONCURRENCY,
             loglevel=conf.CELERYD_LOG_LEVEL, logfile=conf.CELERYD_LOG_FILE,
             hostname=None, discard=False, run_clockservice=False,
             schedule=conf.CELERYBEAT_SCHEDULE_FILENAME,
-            events=False, **kwargs):
+            task_time_limit=conf.CELERYD_TASK_TIME_LIMIT,
+            task_soft_time_limit=conf.CELERYD_TASK_SOFT_TIME_LIMIT,
+            max_tasks_per_child=conf.CELERYD_MAX_TASKS_PER_CHILD,
+            queues=None, events=False, db=None, **kwargs):
         self.concurrency = concurrency or multiprocessing.cpu_count()
         self.loglevel = loglevel
         self.logfile = logfile
@@ -128,22 +187,25 @@ class Worker(object):
         self.run_clockservice = run_clockservice
         self.schedule = schedule
         self.events = events
+        self.task_time_limit = task_time_limit
+        self.task_soft_time_limit = task_soft_time_limit
+        self.max_tasks_per_child = max_tasks_per_child
+        self.db = db
+        self.queues = queues or []
+        self._isatty = sys.stdout.isatty()
+
+        if isinstance(self.queues, basestring):
+            self.queues = self.queues.split(",")
+
         if not isinstance(self.loglevel, int):
             self.loglevel = conf.LOG_LEVELS[self.loglevel.upper()]
 
     def run(self):
+        self.init_loader()
+        self.init_queues()
+        self.redirect_stdouts_to_logger()
         print("celery@%s v%s is starting." % (self.hostname,
                                               celery.__version__))
-
-        self.init_loader()
-
-        if conf.RESULT_BACKEND == "database" \
-                and self.settings.DATABASE_ENGINE == "sqlite3" and \
-                self.concurrency > 1:
-            warnings.warn("The sqlite3 database engine doesn't handle "
-                          "concurrency well. Will use a single process only.",
-                          UserWarning)
-            self.concurrency = 1
 
         if getattr(self.settings, "DEBUG", False):
             warnings.warn("Using settings.DEBUG leads to a memory leak, "
@@ -164,10 +226,33 @@ class Worker(object):
         signals.worker_ready.send(sender=listener)
         print("celery@%s has started." % self.hostname)
 
+    def init_queues(self):
+        if self.queues:
+            conf.QUEUES = dict((queue, options)
+                                for queue, options in conf.QUEUES.items()
+                                    if queue in self.queues)
+            for queue in self.queues:
+                if queue not in conf.QUEUES:
+                    if conf.CREATE_MISSING_QUEUES:
+                        Router(queues=conf.QUEUES).add_queue(queue)
+                    else:
+                        raise ImproperlyConfigured(
+                            "Queue '%s' not defined in CELERY_QUEUES" % queue)
+
     def init_loader(self):
         from celery.loaders import current_loader, load_settings
         self.loader = current_loader()
         self.settings = load_settings()
+        if not self.loader.configured:
+            raise ImproperlyConfigured(
+                    "Celery needs to be configured to run celeryd.")
+
+    def redirect_stdouts_to_logger(self):
+        from celery import log
+        # Redirect stdout/stderr to our logger.
+        logger = log.setup_logger(loglevel=self.loglevel,
+                                  logfile=self.logfile)
+        log.redirect_stdouts_to_logger(logger, loglevel=logging.WARNING)
 
     def purge_messages(self):
         discarded_count = discard_all()
@@ -195,9 +280,11 @@ class Worker(object):
             include_builtins = self.loglevel <= logging.DEBUG
             tasklist = self.tasklist(include_builtins=include_builtins)
 
+        queues = conf.get_queues()
+
         return STARTUP_INFO_FMT % {
             "conninfo": info.format_broker_info(),
-            "queues": info.format_routing_table(indent=8),
+            "queues": info.format_queues(queues, indent=8),
             "concurrency": self.concurrency,
             "loglevel": conf.LOG_LEVELS[self.loglevel],
             "logfile": self.logfile or "[stderr]",
@@ -208,27 +295,44 @@ class Worker(object):
         }
 
     def run_worker(self):
-        worker = WorkController(concurrency=self.concurrency,
+        worker = self.WorkController(concurrency=self.concurrency,
                                 loglevel=self.loglevel,
                                 logfile=self.logfile,
                                 hostname=self.hostname,
                                 ready_callback=self.on_listener_ready,
                                 embed_clockservice=self.run_clockservice,
                                 schedule_filename=self.schedule,
-                                send_events=self.events)
+                                send_events=self.events,
+                                db=self.db,
+                                max_tasks_per_child=self.max_tasks_per_child,
+                                task_time_limit=self.task_time_limit,
+                                task_soft_time_limit=self.task_soft_time_limit)
+        self.install_platform_tweaks(worker)
+        worker.start()
+
+    def install_platform_tweaks(self, worker):
+        """Install platform specific tweaks and workarounds."""
+        if IS_OSX:
+            self.osx_proxy_detection_workaround()
 
         # Install signal handler so SIGHUP restarts the worker.
-        install_worker_restart_handler(worker)
+        if not self._isatty:
+            # only install HUP handler if detached from terminal,
+            # so closing the terminal window doesn't restart celeryd
+            # into the background.
+            if IS_OSX:
+                # OS X can't exec from a process using threads.
+                # See http://github.com/ask/celery/issues#issue/152
+                install_HUP_not_supported_handler(worker)
+            else:
+                install_worker_restart_handler(worker)
         install_worker_term_handler(worker)
         install_worker_int_handler(worker)
-
         signals.worker_init.send(sender=worker)
-        try:
-            worker.start()
-        except Exception, exc:
-            emergency_error(self.logfile,
-                    "celeryd raised exception %s: %s\n%s" % (
-                        exc.__class__, exc, traceback.format_exc()))
+
+    def osx_proxy_detection_workaround(self):
+        """See http://github.com/ask/celery/issues#issue/161"""
+        os.environ.setdefault("celery_dummy_proxy", "set_by_celeryd")
 
 
 def install_worker_int_handler(worker):
@@ -236,8 +340,25 @@ def install_worker_int_handler(worker):
     def _stop(signum, frame):
         process_name = multiprocessing.current_process().name
         if process_name == "MainProcess":
+            worker.logger.warn(
+                "celeryd: Hitting Ctrl+C again will terminate "
+                "all running tasks!")
+            install_worker_int_again_handler(worker)
+            worker.logger.warn("celeryd: Warm shutdown (%s)" % (
+                process_name))
+            worker.stop()
+        raise SystemExit()
+
+    platform.install_signal_handler("SIGINT", _stop)
+
+
+def install_worker_int_again_handler(worker):
+
+    def _stop(signum, frame):
+        process_name = multiprocessing.current_process().name
+        if process_name == "MainProcess":
             worker.logger.warn("celeryd: Cold shutdown (%s)" % (
-                                    process_name))
+                process_name))
             worker.terminate()
         raise SystemExit()
 
@@ -269,6 +390,15 @@ def install_worker_restart_handler(worker):
     platform.install_signal_handler("SIGHUP", restart_worker_sig_handler)
 
 
+def install_HUP_not_supported_handler(worker):
+
+    def warn_on_HUP_handler(signum, frame):
+        worker.logger.error("SIGHUP not supported: "
+            "Restarting with HUP is unstable on this platform!")
+
+    platform.install_signal_handler("SIGHUP", warn_on_HUP_handler)
+
+
 def parse_options(arguments):
     """Parse the available options to ``celeryd``."""
     parser = optparse.OptionParser(option_list=OPTION_LIST)
@@ -280,7 +410,7 @@ def set_process_status(info):
     arg_start = "manage" in sys.argv[0] and 2 or 1
     if sys.argv[arg_start:]:
         info = "%s (%s)" % (info, " ".join(sys.argv[arg_start:]))
-    platform.set_mp_process_title("celeryd", info=info)
+    return platform.set_mp_process_title("celeryd", info=info)
 
 
 def run_worker(**options):

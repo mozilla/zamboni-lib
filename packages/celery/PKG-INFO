@@ -1,10 +1,10 @@
 Metadata-Version: 1.0
 Name: celery
-Version: 1.0.2
+Version: 2.0.3
 Summary: Distributed Task Queue
 Home-page: http://github.com/ask/celery/
 Author: Ask Solem
-Author-email: askh@opera.com
+Author-email: ask@celeryproject.org
 License: BSD
 Description: =================================
         celery - Distributed Task Queue
@@ -12,17 +12,18 @@ Description: =================================
         
         .. image:: http://cloud.github.com/downloads/ask/celery/celery_favicon_128.png
         
-        :Version: 1.0.1
+        :Version: 2.0.3
         :Web: http://celeryproject.org/
         :Download: http://pypi.python.org/pypi/celery/
         :Source: http://github.com/ask/celery/
         :Keywords: task queue, job queue, asynchronous, rabbitmq, amqp, redis,
-        django, python, webhooks, queue, distributed
+        python, webhooks, queue, distributed
         
         --
         
-        Celery is a task queue/job queue based on distributed message passing.
-        It is focused on real-time operation, but supports scheduling as well.
+        Celery is an open source asynchronous task queue/job queue based on
+        distributed message passing. It is focused on real-time operation,
+        but supports scheduling as well.
         
         The execution units, called tasks, are executed concurrently on a single or
         more worker servers. Tasks can execute asynchronously (in the background) or synchronously
@@ -30,15 +31,24 @@ Description: =================================
         
         Celery is already used in production to process millions of tasks a day.
         
-        Celery was originally created for use with Django, but is now usable
-        from any Python project. It can
-        also `operate with other languages via webhooks`_.
+        Celery is written in Python, but the protocol can be implemented in any
+        language. It can also `operate with other languages using webhooks`_.
         
-        The recommended message broker is `RabbitMQ`_, but support for Redis and
-        databases is also available.
+        The recommended message broker is `RabbitMQ`_, but support for `Redis`_ and
+        databases (`SQLAlchemy`_) is also available.
         
-        .. _`operate with other languages via webhooks`:
+        You may also be pleased to know that full Django integration exists,
+        delivered by the `django-celery`_ package.
+        
+        .. _`RabbitMQ`: http://www.rabbitmq.com/
+        .. _`Redis`: http://code.google.com/p/redis/
+        .. _`SQLAlchemy`: http://www.sqlalchemy.org/
+        .. _`django-celery`: http://pypi.python.org/pypi/django-celery
+        .. _`operate with other languages using webhooks`:
         http://ask.github.com/celery/userguide/remote-tasks.html
+        
+        .. contents::
+        :local:
         
         Overview
         ========
@@ -49,7 +59,7 @@ Description: =================================
         
         The broker pushes tasks to the worker servers.
         A worker server is a networked machine running ``celeryd``. This can be one or
-        more machines, depending on the workload.
+        more machines depending on the workload.
         
         The result of the task can be stored for later retrieval (called its
         "tombstone").
@@ -158,12 +168,10 @@ Description: =================================
         +-----------------+----------------------------------------------------+
         
         
-        .. _`RabbitMQ`: http://www.rabbitmq.com/
         .. _`clustering`: http://www.rabbitmq.com/clustering.html
         .. _`AMQP`: http://www.amqp.org/
         .. _`Stomp`: http://stomp.codehaus.org/
         .. _`MongoDB`: http://www.mongodb.org/
-        .. _`Redis`: http://code.google.com/p/redis/
         .. _`Tokyo Tyrant`: http://tokyocabinet.sourceforge.net/
         
         Documentation
@@ -261,9 +269,7 @@ Description: =================================
         
 Platform: any
 Classifier: Development Status :: 5 - Production/Stable
-Classifier: Framework :: Django
 Classifier: Operating System :: OS Independent
-Classifier: Programming Language :: Python
 Classifier: Environment :: No Input/Output (Daemon)
 Classifier: Intended Audience :: Developers
 Classifier: License :: OSI Approved :: BSD License
@@ -271,3 +277,9 @@ Classifier: Operating System :: POSIX
 Classifier: Topic :: Communications
 Classifier: Topic :: System :: Distributed Computing
 Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.4
+Classifier: Programming Language :: Python :: 2.5
+Classifier: Programming Language :: Python :: 2.6
+Classifier: Programming Language :: Python :: 2.7

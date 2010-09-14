@@ -316,6 +316,10 @@ except ImportError:
             msg, kwargs = self.process(msg, kwargs)
             self.logger.warning(msg, *args, **kwargs)
 
+        def warn(self, msg, *args, **kwargs):
+            msg, kwargs = self.process(msg, kwargs)
+            self.logger.warn(msg, *args, **kwargs)
+
         def error(self, msg, *args, **kwargs):
             msg, kwargs = self.process(msg, kwargs)
             self.logger.error(msg, *args, **kwargs)
@@ -332,3 +336,41 @@ except ImportError:
         def log(self, level, msg, *args, **kwargs):
             msg, kwargs = self.process(msg, kwargs)
             self.logger.log(level, msg, *args, **kwargs)
+
+        def isEnabledFor(self, level, *args, **kwargs):
+            return self.logger.isEnabledFor(level, *args, **kwargs)
+
+############## itertools.izip_longest #######################################
+
+try:
+    from itertools import izip_longest
+except ImportError:
+    import itertools
+    def izip_longest(*args, **kwds):
+        fillvalue = kwds.get("fillvalue")
+
+        def sentinel(counter=([fillvalue] * (len(args) - 1)).pop):
+            yield counter() # yields the fillvalue, or raises IndexError
+
+        fillers = itertools.repeat(fillvalue)
+        iters = [itertools.chain(it, sentinel(), fillers)
+                    for it in args]
+        try:
+            for tup in itertools.izip(*iters):
+                yield tup
+        except IndexError:
+            pass
+
+############## itertools.chain.from_iterable ################################
+from itertools import chain
+
+
+def _compat_chain_from_iterable(iterables):
+    for it in iterables:
+        for element in it:
+            yield element
+
+try:
+    chain_from_iterable = getattr(chain, "from_iterable")
+except AttributeError:
+    chain_from_iterable = _compat_chain_from_iterable

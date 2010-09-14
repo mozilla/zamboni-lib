@@ -1,3 +1,5 @@
+from importlib import import_module
+
 BUILTIN_MODULES = ["celery.task"]
 
 
@@ -19,9 +21,15 @@ class BaseLoader(object):
     """
     _conf_cache = None
     worker_initialized = False
+    override_backends = {}
+    configured = False
 
     def on_task_init(self, task_id, task):
         """This method is called before a task is executed."""
+        pass
+
+    def on_process_cleanup(self):
+        """This method is called after a task is executed."""
         pass
 
     def on_worker_init(self):
@@ -29,7 +37,7 @@ class BaseLoader(object):
         pass
 
     def import_task_module(self, module):
-        return __import__(module, [], [], [''])
+        return import_module(module)
 
     def import_default_modules(self):
         imports = getattr(self.conf, "CELERY_IMPORTS", None) or []

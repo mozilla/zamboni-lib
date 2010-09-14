@@ -1,10 +1,11 @@
-import unittest2 as unittest
+import sys
+import time
 import logging
 import itertools
-import time
-from celery.worker.pool import TaskPool
+import unittest2 as unittest
+
+from celery.concurrency.processes import TaskPool
 from celery.datastructures import ExceptionInfo
-import sys
 
 
 def do_something(i):
@@ -28,13 +29,6 @@ class TestTaskPool(unittest.TestCase):
         p = TaskPool(limit=2)
         self.assertEqual(p.limit, 2)
         self.assertIsInstance(p.logger, logging.Logger)
-        self.assertIsNone(p._pool)
-
-    def test_start_stop(self):
-        p = TaskPool(limit=2)
-        p.start()
-        self.assertIsNotNone(p._pool)
-        p.stop()
         self.assertIsNone(p._pool)
 
     def x_apply(self):

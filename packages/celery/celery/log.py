@@ -1,22 +1,45 @@
 """celery.log"""
+import logging
+import threading
+import time
 import os
 import sys
-import time
-import logging
 import traceback
 
 from celery import conf
 from celery.utils import noop
-from celery.utils.patch import ensure_process_aware_logger
 from celery.utils.compat import LoggerAdapter
+from celery.utils.patch import ensure_process_aware_logger
 
 _hijacked = False
 _monkeypatched = False
 
+BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
+RESET_SEQ = "\033[0m"
+COLOR_SEQ = "\033[1;%dm"
+BOLD_SEQ = "\033[1m"
+COLORS = {"DEBUG": BLUE,
+          "WARNING": YELLOW,
+          "ERROR": RED,
+          "CRITICAL": MAGENTA}
 
-def get_task_logger(loglevel=None):
+
+class ColorFormatter(logging.Formatter):
+    def __init__(self, msg, use_color=True):
+        logging.Formatter.__init__(self, msg)
+        self.use_color = use_color
+
+    def format(self, record):
+        levelname = record.levelname
+        if self.use_color and levelname in COLORS:
+            record.msg = COLOR_SEQ % (
+                    30 + COLORS[levelname]) + record.msg + RESET_SEQ
+        return logging.Formatter.format(self, record)
+
+
+def get_task_logger(loglevel=None, name=None):
     ensure_process_aware_logger()
-    logger = logging.getLogger("celery.Task")
+    logger = logging.getLogger(name or "celery.task.default")
     if loglevel is not None:
         logger.setLevel(loglevel)
     return logger
@@ -64,7 +87,8 @@ def get_default_logger(loglevel=None):
 
 
 def setup_logger(loglevel=conf.CELERYD_LOG_LEVEL, logfile=None,
-        format=conf.CELERYD_LOG_FORMAT, **kwargs):
+        format=conf.CELERYD_LOG_FORMAT, colorize=conf.CELERYD_LOG_COLOR,
+        **kwargs):
     """Setup the ``multiprocessing`` logger. If ``logfile`` is not specified,
     then ``stderr`` is used.
 
@@ -72,11 +96,12 @@ def setup_logger(loglevel=conf.CELERYD_LOG_LEVEL, logfile=None,
 
     """
     return _setup_logger(get_default_logger(loglevel),
-                         logfile, format, **kwargs)
+                         logfile, format, colorize, **kwargs)
 
 
 def setup_task_logger(loglevel=conf.CELERYD_LOG_LEVEL, logfile=None,
-        format=conf.CELERYD_TASK_LOG_FORMAT, task_kwargs=None, **kwargs):
+        format=conf.CELERYD_TASK_LOG_FORMAT, colorize=conf.CELERYD_LOG_COLOR,
+        task_kwargs=None, **kwargs):
     """Setup the task logger. If ``logfile`` is not specified, then
     ``stderr`` is used.
 
@@ -86,19 +111,20 @@ def setup_task_logger(loglevel=conf.CELERYD_LOG_LEVEL, logfile=None,
     if task_kwargs is None:
         task_kwargs = {}
     task_kwargs.setdefault("task_id", "-?-")
+    task_name = task_kwargs.get("task_name")
     task_kwargs.setdefault("task_name", "-?-")
-    logger = _setup_logger(get_task_logger(loglevel),
-                           logfile, format, **kwargs)
+    logger = _setup_logger(get_task_logger(loglevel, task_name),
+                           logfile, format, colorize, **kwargs)
     return LoggerAdapter(logger, task_kwargs)
 
 
-def _setup_logger(logger, logfile, format,
-        formatter=logging.Formatter, **kwargs):
+def _setup_logger(logger, logfile, format, colorize,
+        formatter=ColorFormatter, **kwargs):
 
     if logger.handlers: # Logger already configured
         return logger
     handler = _detect_handler(logfile)
-    handler.setFormatter(formatter(format))
+    handler.setFormatter(formatter(format, use_color=colorize))
     logger.addHandler(handler)
     return logger
 
@@ -147,6 +173,7 @@ class LoggingProxy(object):
     name = None
     closed = False
     loglevel = logging.ERROR
+    _thread = threading.local()
 
     def __init__(self, logger, loglevel=None):
         self.logger = logger
@@ -180,9 +207,17 @@ class LoggingProxy(object):
         return map(wrap_handler, self.logger.handlers)
 
     def write(self, data):
+        if getattr(self._thread, "recurse_protection", False):
+            # Logger is logging back to this file, so stop recursing.
+            return
         """Write message to logging object."""
-        if not self.closed:
-            self.logger.log(self.loglevel, data)
+        data = data.strip()
+        if data and not self.closed:
+            self._thread.recurse_protection = True
+            try:
+                self.logger.log(self.loglevel, data)
+            finally:
+                self._thread.recurse_protection = False
 
     def writelines(self, sequence):
         """``writelines(sequence_of_strings) -> None``.

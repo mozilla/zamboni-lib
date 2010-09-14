@@ -1,6 +1,5 @@
-django
 python-dateutil
+sqlalchemy
 anyjson
-carrot>=0.10.3
-django-picklefield
-billiard>=0.2.1
+carrot>=0.10.5
+pyparsing

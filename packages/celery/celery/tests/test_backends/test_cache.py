@@ -1,14 +1,13 @@
 import sys
+import types
 import unittest2 as unittest
 
-from billiard.serialization import pickle
-from django.core.cache.backends.base import InvalidCacheBackendError
-
-from celery import result
 from celery import states
+from celery.backends.cache import CacheBackend, DummyClient
+from celery.exceptions import ImproperlyConfigured
 from celery.utils import gen_unique_id
-from celery.backends.cache import CacheBackend
-from celery.datastructures import ExceptionInfo
+
+from celery.tests.utils import mask_modules
 
 
 class SomeClass(object):
@@ -17,111 +16,114 @@ class SomeClass(object):
         self.data = data
 
 
-class TestCacheBackend(unittest.TestCase):
+class test_CacheBackend(unittest.TestCase):
 
     def test_mark_as_done(self):
-        cb = CacheBackend()
+        tb = CacheBackend(backend="memory://")
 
         tid = gen_unique_id()
 
-        self.assertFalse(cb.is_successful(tid))
-        self.assertEqual(cb.get_status(tid), states.PENDING)
-        self.assertIsNone(cb.get_result(tid))
+        self.assertEqual(tb.get_status(tid), states.PENDING)
+        self.assertIsNone(tb.get_result(tid))
 
-        cb.mark_as_done(tid, 42)
-        self.assertTrue(cb.is_successful(tid))
-        self.assertEqual(cb.get_status(tid), states.SUCCESS)
-        self.assertEqual(cb.get_result(tid), 42)
-        self.assertTrue(cb.get_result(tid), 42)
-
-    def test_save_restore_taskset(self):
-        backend = CacheBackend()
-        taskset_id = gen_unique_id()
-        subtask_ids = [gen_unique_id() for i in range(10)]
-        subtasks = map(result.AsyncResult, subtask_ids)
-        res = result.TaskSetResult(taskset_id, subtasks)
-        res.save(backend=backend)
-        saved = result.TaskSetResult.restore(taskset_id, backend=backend)
-        self.assertListEqual(saved.subtasks, subtasks)
-        self.assertEqual(saved.taskset_id, taskset_id)
+        tb.mark_as_done(tid, 42)
+        self.assertEqual(tb.get_status(tid), states.SUCCESS)
+        self.assertEqual(tb.get_result(tid), 42)
 
     def test_is_pickled(self):
-        cb = CacheBackend()
+        tb = CacheBackend(backend="memory://")
 
         tid2 = gen_unique_id()
         result = {"foo": "baz", "bar": SomeClass(12345)}
-        cb.mark_as_done(tid2, result)
+        tb.mark_as_done(tid2, result)
         # is serialized properly.
-        rindb = cb.get_result(tid2)
+        rindb = tb.get_result(tid2)
         self.assertEqual(rindb.get("foo"), "baz")
         self.assertEqual(rindb.get("bar").data, 12345)
 
     def test_mark_as_failure(self):
-        cb = CacheBackend()
+        tb = CacheBackend(backend="memory://")
 
-        einfo = None
         tid3 = gen_unique_id()
         try:
             raise KeyError("foo")
         except KeyError, exception:
-            einfo = ExceptionInfo(sys.exc_info())
             pass
-        cb.mark_as_failure(tid3, exception, traceback=einfo.traceback)
-        self.assertFalse(cb.is_successful(tid3))
-        self.assertEqual(cb.get_status(tid3), states.FAILURE)
-        self.assertIsInstance(cb.get_result(tid3), KeyError)
-        self.assertEqual(cb.get_traceback(tid3), einfo.traceback)
+        tb.mark_as_failure(tid3, exception)
+        self.assertEqual(tb.get_status(tid3), states.FAILURE)
+        self.assertIsInstance(tb.get_result(tid3), KeyError)
 
     def test_process_cleanup(self):
-        cb = CacheBackend()
-        cb.process_cleanup()
+        tb = CacheBackend(backend="memory://")
+        tb.process_cleanup()
+
+    def test_expires_as_int(self):
+        tb = CacheBackend(backend="memory://", expires=10)
+        self.assertEqual(tb.expires, 10)
+
+    def test_unknown_backend_raises_ImproperlyConfigured(self):
+        self.assertRaises(ImproperlyConfigured,
+                          CacheBackend, backend="unknown://")
 
 
-class TestCustomCacheBackend(unittest.TestCase):
+class test_get_best_memcache(unittest.TestCase):
 
-    def test_custom_cache_backend(self):
-        from celery import conf
-        prev_backend = conf.CELERY_CACHE_BACKEND
-        prev_module = sys.modules["celery.backends.cache"]
-        conf.CELERY_CACHE_BACKEND = "dummy://"
-        sys.modules.pop("celery.backends.cache")
+    def mock_memcache(self):
+        memcache = types.ModuleType("memcache")
+        memcache.Client = DummyClient
+        memcache.Client.__module__ = memcache.__name__
+        prev, sys.modules["memcache"] = sys.modules.get("memcache"), memcache
+        yield True
+        if prev is not None:
+            sys.modules["memcache"] = prev
+        yield True
+
+    def mock_pylibmc(self):
+        pylibmc = types.ModuleType("pylibmc")
+        pylibmc.Client = DummyClient
+        pylibmc.Client.__module__ = pylibmc.__name__
+        prev = sys.modules.get("pylibmc")
+        sys.modules["pylibmc"] = pylibmc
+        yield True
+        if prev is not None:
+            sys.modules["pylibmc"] = prev
+        yield True
+
+    def test_pylibmc(self):
+        pylibmc = self.mock_pylibmc()
+        pylibmc.next()
+        sys.modules.pop("celery.backends.cache", None)
+        from celery.backends import cache
+        self.assertEqual(cache.get_best_memcache().__module__, "pylibmc")
+        pylibmc.next()
+
+    def test_memcache(self):
+
+        def with_no_pylibmc():
+            sys.modules.pop("celery.backends.cache", None)
+            from celery.backends import cache
+            self.assertEqual(cache.get_best_memcache().__module__, "memcache")
+
+        context = mask_modules("pylibmc")
+        context.__enter__()
         try:
-            from celery.backends.cache import cache
-            from django.core.cache import cache as django_cache
-            self.assertEqual(cache.__class__.__module__,
-                              "django.core.cache.backends.dummy")
-            self.assertIsNot(cache, django_cache)
+            memcache = self.mock_memcache()
+            memcache.next()
+            with_no_pylibmc()
+            memcache.next()
         finally:
-            conf.CELERY_CACHE_BACKEND = prev_backend
-            sys.modules["celery.backends.cache"] = prev_module
+            context.__exit__(None, None, None)
 
+    def test_no_implementations(self):
 
-class TestMemcacheWrapper(unittest.TestCase):
+        def with_no_memcache_libs():
+            sys.modules.pop("celery.backends.cache", None)
+            from celery.backends import cache
+            self.assertRaises(ImproperlyConfigured, cache.get_best_memcache)
 
-    def test_memcache_wrapper(self):
-
+        context = mask_modules("pylibmc", "memcache")
+        context.__enter__()
         try:
-            from django.core.cache.backends import memcached
-            from django.core.cache.backends import locmem
-        except InvalidCacheBackendError:
-            sys.stderr.write(
-                "\n* Memcache library is not installed. Skipping test.\n")
-            return
-        prev_cache_cls = memcached.CacheClass
-        memcached.CacheClass = locmem.CacheClass
-        prev_backend_module = sys.modules.pop("celery.backends.cache")
-        try:
-            from celery.backends.cache import cache, DjangoMemcacheWrapper
-            self.assertIsInstance(cache, DjangoMemcacheWrapper)
-
-            key = "cu.test_memcache_wrapper"
-            val = "The quick brown fox."
-            default = "The lazy dog."
-
-            self.assertEqual(cache.get(key, default=default), default)
-            cache.set(key, val)
-            self.assertEqual(pickle.loads(cache.get(key, default=default)),
-                              val)
+            with_no_memcache_libs()
         finally:
-            memcached.CacheClass = prev_cache_cls
-            sys.modules["celery.backends.cache"] = prev_backend_module
+            context.__exit__(None, None, None)

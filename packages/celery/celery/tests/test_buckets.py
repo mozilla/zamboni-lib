@@ -1,17 +1,17 @@
 from __future__ import generators
-import os
+
 import sys
-sys.path.insert(0, os.getcwd())
 import time
 import unittest2 as unittest
+
 from itertools import chain, izip
 
-from billiard.utils.functional import curry
-
-from celery.task.base import Task
-from celery.utils import gen_unique_id
-from celery.worker import buckets
 from celery.registry import TaskRegistry
+from celery.task.base import Task
+from celery.utils import timeutils
+from celery.utils import gen_unique_id
+from celery.utils.functional import curry
+from celery.worker import buckets
 
 from celery.tests.utils import skip_if_environ
 
@@ -40,7 +40,7 @@ class MockJob(object):
                 self.task_name, self.task_id, self.args, self.kwargs)
 
 
-class TestTokenBucketQueue(unittest.TestCase):
+class test_TokenBucketQueue(unittest.TestCase):
 
     @skip_if_disabled
     def empty_queue_yields_QueueEmpty(self):
@@ -93,19 +93,19 @@ class TestTokenBucketQueue(unittest.TestCase):
         self.assertEqual(x.get_nowait(), "The quick brown fox")
 
 
-class TestRateLimitString(unittest.TestCase):
+class test_rate_limit_string(unittest.TestCase):
 
     @skip_if_disabled
     def test_conversion(self):
-        self.assertEqual(buckets.parse_ratelimit_string(999), 999)
-        self.assertEqual(buckets.parse_ratelimit_string("1456/s"), 1456)
-        self.assertEqual(buckets.parse_ratelimit_string("100/m"),
+        self.assertEqual(timeutils.rate(999), 999)
+        self.assertEqual(timeutils.rate("1456/s"), 1456)
+        self.assertEqual(timeutils.rate("100/m"),
                           100 / 60.0)
-        self.assertEqual(buckets.parse_ratelimit_string("10/h"),
+        self.assertEqual(timeutils.rate("10/h"),
                           10 / 60.0 / 60.0)
 
         for zero in (0, None, "0", "0/m", "0/h", "0/s"):
-            self.assertEqual(buckets.parse_ratelimit_string(zero), 0)
+            self.assertEqual(timeutils.rate(zero), 0)
 
 
 class TaskA(Task):
@@ -124,13 +124,51 @@ class TaskD(Task):
     rate_limit = "1000/m"
 
 
-class TestTaskBuckets(unittest.TestCase):
+class test_TaskBucket(unittest.TestCase):
 
     def setUp(self):
         self.registry = TaskRegistry()
         self.task_classes = (TaskA, TaskB, TaskC)
         for task_cls in self.task_classes:
             self.registry.register(task_cls)
+
+    @skip_if_disabled
+    def test_get_nowait(self):
+        x = buckets.TaskBucket(task_registry=self.registry)
+        self.assertRaises(buckets.QueueEmpty, x.get_nowait)
+
+    @skip_if_disabled
+    def test_refresh(self):
+        reg = {}
+        x = buckets.TaskBucket(task_registry=reg)
+        reg["foo"] = "something"
+        x.refresh()
+        self.assertIn("foo", x.buckets)
+        self.assertTrue(x.get_bucket_for_type("foo"))
+
+    @skip_if_disabled
+    def test__get_queue_for_type(self):
+        x = buckets.TaskBucket(task_registry={})
+        x.buckets["foo"] = buckets.TokenBucketQueue(fill_rate=1)
+        self.assertIs(x._get_queue_for_type("foo"), x.buckets["foo"].queue)
+        x.buckets["bar"] = buckets.FastQueue()
+        self.assertIs(x._get_queue_for_type("bar"), x.buckets["bar"])
+
+    @skip_if_disabled
+    def test_update_bucket_for_type(self):
+        bucket = buckets.TaskBucket(task_registry=self.registry)
+        b = bucket._get_queue_for_type(TaskC.name)
+        self.assertIs(bucket.update_bucket_for_type(TaskC.name).queue, b)
+        self.assertIs(bucket.buckets[TaskC.name].queue, b)
+
+    @skip_if_disabled
+    def test_auto_add_on_missing_put(self):
+        reg = {}
+        b = buckets.TaskBucket(task_registry=reg)
+        reg["nonexisting.task"] = "foo"
+
+        b.put(MockJob(gen_unique_id(), "nonexisting.task", (), {}))
+        self.assertIn("nonexisting.task", b.buckets)
 
     @skip_if_disabled
     def test_auto_add_on_missing(self):
@@ -226,5 +264,45 @@ class TestTaskBuckets(unittest.TestCase):
         finally:
             self.registry.unregister(TaskD)
 
-if __name__ == "__main__":
-    unittest.main()
+    @skip_if_disabled
+    def test_empty(self):
+        x = buckets.TaskBucket(task_registry=self.registry)
+        self.assertTrue(x.empty())
+        x.put(MockJob(gen_unique_id(), TaskC.name, [], {}))
+        self.assertFalse(x.empty())
+        x.clear()
+        self.assertTrue(x.empty())
+
+    @skip_if_disabled
+    def test_items(self):
+        x = buckets.TaskBucket(task_registry=self.registry)
+        x.buckets[TaskA.name].put(1)
+        x.buckets[TaskB.name].put(2)
+        x.buckets[TaskC.name].put(3)
+        self.assertItemsEqual(x.items, [1, 2, 3])
+
+
+class test_FastQueue(unittest.TestCase):
+
+    def test_can_consume(self):
+        x = buckets.FastQueue()
+        self.assertTrue(x.can_consume())
+
+    def test_items(self):
+        x = buckets.FastQueue()
+        x.put(10)
+        x.put(20)
+        self.assertListEqual([10, 20], list(x.items))
+
+    def test_wait(self):
+        x = buckets.FastQueue()
+        x.put(10)
+        self.assertEqual(x.wait(), 10)
+
+    def test_clear(self):
+        x = buckets.FastQueue()
+        x.put(10)
+        x.put(20)
+        self.assertFalse(x.empty())
+        x.clear()
+        self.assertTrue(x.empty())

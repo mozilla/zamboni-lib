@@ -572,9 +572,9 @@ class Publisher(object):
         The default delivery mode used for messages. The value is an integer.
         The following delivery modes are supported by (at least) RabbitMQ:
 
-            * 1 or "non-persistent"
+            * 1 or "transient"
 
-                The message is non-persistent. Which means it is stored in
+                The message is transient. Which means it is stored in
                 memory only, and is lost if the server dies or restarts.
 
             * 2 or "persistent"
@@ -616,10 +616,12 @@ class Publisher(object):
     """
 
     NONE_PERSISTENT_DELIVERY_MODE = 1
+    TRANSIENT_DELIVERY_MODE = 1
     PERSISTENT_DELIVERY_MODE = 2
     DELIVERY_MODES = {
-            "non-persistent": NONE_PERSISTENT_DELIVERY_MODE,
+            "transient": TRANSIENT_DELIVERY_MODE,
             "persistent": PERSISTENT_DELIVERY_MODE,
+            "non-persistent": TRANSIENT_DELIVERY_MODE,
     }
 
     exchange = ""
@@ -876,13 +878,16 @@ class ConsumerSet(object):
         self.connection = connection
         self.options = options
         self.from_dict = from_dict or {}
-        self.consumers = consumers or []
+        self.consumers = []
         self.callbacks = callbacks or []
         self._open_consumers = []
 
         self.backend = self.connection.create_backend()
 
         self.auto_ack = options.get("auto_ack", self.auto_ack)
+
+        if consumers:
+            [self.add_consumer(consumer) for consumer in consumers]
 
         [self.add_consumer_from_dict(queue_name, **queue_options)
                 for queue_name, queue_options in self.from_dict.items()]

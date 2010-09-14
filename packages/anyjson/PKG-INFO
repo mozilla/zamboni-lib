@@ -1,8 +1,7 @@
 Metadata-Version: 1.0
 Name: anyjson
-Version: 0.2.4
-Summary: Wraps the best available JSON implementation available in a common
-interface
+Version: 0.2.5
+Summary: Wraps the best available JSON implementation available in a common interface
 Home-page: http://bitbucket.org/runeh/anyjson
 Author: Rune Halvorsen
 Author-email: runefh@gmail.com

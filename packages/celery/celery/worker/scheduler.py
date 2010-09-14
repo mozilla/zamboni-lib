@@ -1,8 +1,10 @@
 from __future__ import generators
+
 import time
 import heapq
 
-from celery.worker.revoke import revoked
+from datetime import datetime
+
 from celery import log
 
 DEFAULT_MAX_INTERVAL = 2
@@ -34,7 +36,16 @@ class Scheduler(object):
             This callback takes no arguments.
 
         """
-        eta = eta and time.mktime(eta.timetuple()) or time.time()
+        if isinstance(eta, datetime):
+            try:
+                eta = time.mktime(eta.timetuple())
+            except OverflowError:
+                # this machine can't represent the passed in time as
+                # a unix timestamp just ignore this for now
+                self.logger.error("Cannot represent %s as a unix timestamp. "
+                                  "Ignoring %s." % (eta, item))
+                return
+        eta = eta or time.time()
         heapq.heappush(self._queue, (eta, priority, item, callback))
 
     def __iter__(self):
@@ -50,16 +61,11 @@ class Scheduler(object):
                 eta, priority, item, callback = verify = self._queue[0]
                 now = nowfun()
 
-                # FIXME: Need a generic hook for this
-                if item.task_id in revoked:
+                if item.revoked():
                     event = pop(self._queue)
-                    if event is verify:
-                        item.on_ack()
-                        self.logger.warn(
-                                "Mediator: Skipping revoked task: %s[%s]" % (
-                                    item.task_name, item.task_id))
-                    else:
+                    if event is not verify:
                         heapq.heappush(self._queue, event)
+                    continue
 
                 if now < eta:
                     yield min(eta - now, self.max_interval)
@@ -68,8 +74,9 @@ class Scheduler(object):
 
                     if event is verify:
                         ready_queue.put(item)
-                        callback and callback()
-                        yield 0
+                        if callback is not None:
+                            callback()
+                        continue
                     else:
                         heapq.heappush(self._queue, event)
             yield None
@@ -80,6 +87,10 @@ class Scheduler(object):
 
     def clear(self):
         self._queue = []
+
+    def info(self):
+        return ({"eta": eta, "priority": priority, "item": item}
+                    for eta, priority, item, _ in self.queue)
 
     @property
     def queue(self):

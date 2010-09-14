@@ -5,26 +5,26 @@ Sending and Receiving Messages
 """
 import socket
 from datetime import datetime, timedelta
+from itertools import count
 
-from carrot.connection import DjangoBrokerConnection
+from carrot.connection import BrokerConnection
 from carrot.messaging import Publisher, Consumer, ConsumerSet as _ConsumerSet
-from billiard.utils.functional import wraps
 
 from celery import conf
 from celery import signals
 from celery.utils import gen_unique_id, mitemgetter, noop
+from celery.utils.functional import wraps
 
 
-MSG_OPTIONS = ("mandatory", "priority",
-               "immediate", "routing_key",
-               "serializer", "delivery_mode")
+MSG_OPTIONS = ("mandatory", "priority", "immediate",
+               "routing_key", "serializer", "delivery_mode")
 
 get_msg_options = mitemgetter(*MSG_OPTIONS)
 extract_msg_options = lambda d: dict(zip(MSG_OPTIONS, get_msg_options(d)))
-default_queue = conf.routing_table[conf.DEFAULT_QUEUE]
+default_queue = conf.get_queues()[conf.DEFAULT_QUEUE]
 
 _queues_declared = False
-_exchanges_declared = {}
+_exchanges_declared = set()
 
 
 class TaskPublisher(Publisher):
@@ -44,18 +44,27 @@ class TaskPublisher(Publisher):
             consumers = get_consumer_set(self.connection)
             consumers.close()
             _queues_declared = True
+        self.declare()
+
+    def declare(self):
         if self.exchange not in _exchanges_declared:
-            self.declare()
-            _exchanges_declared[self.exchange] = True
+            super(TaskPublisher, self).declare()
+            _exchanges_declared.add(self.exchange)
 
     def delay_task(self, task_name, task_args=None, task_kwargs=None,
             countdown=None, eta=None, task_id=None, taskset_id=None, **kwargs):
         """Delay task for execution by the celery nodes."""
 
         task_id = task_id or gen_unique_id()
-
+        task_args = task_args or []
+        task_kwargs = task_kwargs or {}
         if countdown: # Convert countdown to ETA.
             eta = datetime.now() + timedelta(seconds=countdown)
+
+        if not isinstance(task_args, (list, tuple)):
+            raise ValueError("task args must be a list or tuple")
+        if not isinstance(task_kwargs, dict):
+            raise ValueError("task kwargs must be a dictionary")
 
         message_data = {
             "task": task_name,
@@ -117,6 +126,7 @@ class EventPublisher(Publisher):
     exchange = conf.EVENT_EXCHANGE
     exchange_type = conf.EVENT_EXCHANGE_TYPE
     routing_key = conf.EVENT_ROUTING_KEY
+    serializer = conf.EVENT_SERIALIZER
 
 
 class EventConsumer(Consumer):
@@ -128,15 +138,62 @@ class EventConsumer(Consumer):
     no_ack = True
 
 
+class ControlReplyConsumer(Consumer):
+    exchange = "celerycrq"
+    exchange_type = "direct"
+    durable = False
+    exclusive = False
+    auto_delete = True
+    no_ack = True
+
+    def __init__(self, connection, ticket, **kwargs):
+        self.ticket = ticket
+        queue = "%s.%s" % (self.exchange, ticket)
+        super(ControlReplyConsumer, self).__init__(connection,
+                                                   queue=queue,
+                                                   routing_key=ticket,
+                                                   **kwargs)
+
+    def collect(self, limit=None, timeout=1):
+        responses = []
+
+        def callback(message_data, message):
+            responses.append(message_data)
+
+        self.callbacks = [callback]
+        self.consume()
+        for i in limit and range(limit) or count():
+            try:
+                self.connection.drain_events(timeout=timeout)
+            except socket.timeout:
+                break
+
+        return responses
+
+
+class ControlReplyPublisher(Publisher):
+    exchange = "celerycrq"
+    exchange_type = "direct"
+    delivery_mode = "non-persistent"
+    durable = False
+    auto_delete = True
+
+
 class BroadcastPublisher(Publisher):
     """Publish broadcast commands"""
+
+    ReplyTo = ControlReplyConsumer
+
     exchange = conf.BROADCAST_EXCHANGE
     exchange_type = conf.BROADCAST_EXCHANGE_TYPE
 
-    def send(self, type, arguments, destination=None):
+    def send(self, type, arguments, destination=None, reply_ticket=None):
         """Send broadcast command."""
         arguments["command"] = type
         arguments["destination"] = destination
+        if reply_ticket:
+            arguments["reply_to"] = {"exchange": self.ReplyTo.exchange,
+                                     "routing_key": reply_ticket}
         super(BroadcastPublisher, self).send({"control": arguments})
 
 
@@ -153,9 +210,25 @@ class BroadcastConsumer(Consumer):
         super(BroadcastConsumer, self).__init__(*args, **kwargs)
 
 
-def establish_connection(connect_timeout=conf.BROKER_CONNECTION_TIMEOUT):
+def establish_connection(hostname=None, userid=None, password=None,
+        virtual_host=None, port=None, ssl=None, insist=None,
+        connect_timeout=None, backend_cls=None):
     """Establish a connection to the message broker."""
-    return DjangoBrokerConnection(connect_timeout=connect_timeout)
+    if insist is None:
+        insist = conf.BROKER_INSIST
+    if ssl is None:
+        ssl = conf.BROKER_USE_SSL
+    if connect_timeout is None:
+        connect_timeout = conf.BROKER_CONNECTION_TIMEOUT
+
+    return BrokerConnection(hostname or conf.BROKER_HOST,
+                            userid or conf.BROKER_USER,
+                            password or conf.BROKER_PASSWORD,
+                            virtual_host or conf.BROKER_VHOST,
+                            port or conf.BROKER_PORT,
+                            backend_cls=backend_cls or conf.BROKER_BACKEND,
+                            insist=insist, ssl=ssl,
+                            connect_timeout=connect_timeout)
 
 
 def with_connection(fun):
@@ -186,7 +259,7 @@ def get_consumer_set(connection, queues=None, **options):
     Defaults to the queues in ``CELERY_QUEUES``.
 
     """
-    queues = queues or conf.routing_table
+    queues = queues or conf.get_queues()
     cset = ConsumerSet(connection)
     for queue_name, queue_options in queues.items():
         queue_options = dict(queue_options)
@@ -195,3 +268,11 @@ def get_consumer_set(connection, queues=None, **options):
                             backend=cset.backend, **queue_options)
         cset.consumers.append(consumer)
     return cset
+
+
+@with_connection
+def reply(data, exchange, routing_key, connection=None, connect_timeout=None,
+        **kwargs):
+    pub = ControlReplyPublisher(connection, exchange=exchange,
+                    routing_key=routing_key, **kwargs)
+    pub.send(data)

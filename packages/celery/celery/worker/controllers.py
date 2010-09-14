@@ -7,8 +7,8 @@ import time
 import threading
 from Queue import Empty as QueueEmpty
 
+from celery import conf
 from celery import log
-from celery.worker.revoke import revoked
 
 
 class BackgroundThread(threading.Thread):
@@ -60,6 +60,7 @@ class BackgroundThread(threading.Thread):
         self.on_stop()
         self._shutdown.set()
         self._stopped.wait() # block until this thread is done
+        self.join(1e100)
 
 
 class Mediator(BackgroundThread):
@@ -90,10 +91,7 @@ class Mediator(BackgroundThread):
         except QueueEmpty:
             time.sleep(0.2)
         else:
-            if task.task_id in revoked: # task revoked
-                task.on_ack()
-                self.logger.warn("Mediator: Skipping revoked task: %s[%s]" % (
-                        task.task_name, task.task_id))
+            if task.revoked():
                 return
 
             self.logger.debug(
@@ -105,18 +103,17 @@ class Mediator(BackgroundThread):
 class ScheduleController(BackgroundThread):
     """Schedules tasks with an ETA by moving them to the bucket queue."""
 
-    def __init__(self, eta_schedule, logger=None):
+    def __init__(self, eta_schedule, logger=None,
+            precision=None):
         super(ScheduleController, self).__init__()
         self.logger = logger or log.get_default_logger()
         self._scheduler = iter(eta_schedule)
+        self.precision = precision or conf.CELERYD_ETA_SCHEDULER_PRECISION
         self.debug = log.SilenceRepeated(self.logger.debug, max_iterations=10)
 
     def on_iteration(self):
         """Wake-up scheduler"""
         delay = self._scheduler.next()
-        if delay is None:
-            delay = 1
-
-        self.debug("ScheduleController: Scheduler wake-up",
-              "ScheduleController: Next wake-up eta %s seconds..." % delay)
-        time.sleep(delay)
+        self.debug("ScheduleController: Scheduler wake-up"
+                "ScheduleController: Next wake-up eta %s seconds..." % delay)
+        time.sleep(delay or self.precision)

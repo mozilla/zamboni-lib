@@ -5,6 +5,7 @@ from Queue import Queue
 from celery.utils import gen_unique_id
 from celery.worker.controllers import Mediator
 from celery.worker.controllers import BackgroundThread, ScheduleController
+from celery.worker.state import revoked as revoked_tasks
 
 
 class MockTask(object):
@@ -17,6 +18,12 @@ class MockTask(object):
 
     def on_ack(self):
         self.acked = True
+
+    def revoked(self):
+        if self.task_id in revoked_tasks:
+            self.on_ack()
+            return True
+        return False
 
 
 class MyBackgroundThread(BackgroundThread):
@@ -68,11 +75,11 @@ class TestMediator(unittest.TestCase):
             got["value"] = value.value
 
         m = Mediator(ready_queue, mycallback)
-        ready_queue.put(MockTask("George Constanza"))
+        ready_queue.put(MockTask("George Costanza"))
 
         m.on_iteration()
 
-        self.assertEqual(got["value"], "George Constanza")
+        self.assertEqual(got["value"], "George Costanza")
 
     def test_mediator_on_iteration_revoked(self):
         ready_queue = Queue()
@@ -84,8 +91,7 @@ class TestMediator(unittest.TestCase):
         m = Mediator(ready_queue, mycallback)
         t = MockTask("Jerry Seinfeld")
         t.task_id = gen_unique_id()
-        from celery.worker.revoke import revoked
-        revoked.add(t.task_id)
+        revoked_tasks.add(t.task_id)
         ready_queue.put(t)
 
         m.on_iteration()
@@ -111,7 +117,7 @@ class TestScheduleController(unittest.TestCase):
         try:
             for i in times:
                 c.on_iteration()
-                res = i is None and 1 or i
+                res = i or 1
                 self.assertEqual(slept[0], res)
         finally:
             time.sleep = old_sleep

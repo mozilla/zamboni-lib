@@ -1,15 +1,26 @@
 from __future__ import generators
-"""
 
-Custom Datastructures
-
-"""
 import time
 import traceback
+
 from UserList import UserList
 from Queue import Queue, Empty as QueueEmpty
 
 from celery.utils.compat import OrderedDict
+
+
+class AttributeDict(dict):
+    """Dict subclass with attribute access."""
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError("'%s' object has no attribute '%s'" % (
+                    self.__class__.__name__, key))
+
+    def __setattr__(self, key, value):
+        self[key] = value
 
 
 class PositionQueue(UserList):
@@ -140,10 +151,12 @@ class SharedCounter(object):
     def increment(self, n=1):
         """Increment value."""
         self += n
+        return int(self)
 
     def decrement(self, n=1):
         """Decrement value."""
         self -= n
+        return int(self)
 
     def _update_value(self):
         self._value += sum(consume_queue(self._modify_queue))
@@ -208,6 +221,15 @@ class LimitedSet(object):
 
     def __contains__(self, value):
         return value in self._data
+
+    def update(self, other):
+        if isinstance(other, self.__class__):
+            self._data.update(other._data)
+        else:
+            self._data.update(other)
+
+    def as_dict(self):
+        return self._data
 
     def __iter__(self):
         return iter(self._data.keys())

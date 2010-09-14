@@ -1,13 +1,11 @@
 """celery.backends.base"""
 import time
 
-from billiard.serialization import pickle
-from billiard.serialization import get_pickled_exception
-from billiard.serialization import get_pickleable_exception
-
 from celery import conf
 from celery import states
-from celery.exceptions import TimeoutError
+from celery.exceptions import TimeoutError, TaskRevokedError
+from celery.serialization import pickle, get_pickled_exception
+from celery.serialization import get_pickleable_exception
 from celery.datastructures import LocalCache
 
 
@@ -20,21 +18,23 @@ class BaseBackend(object):
 
     TimeoutError = TimeoutError
 
-    capabilities = []
-
     def __init__(self, *args, **kwargs):
         pass
 
     def encode_result(self, result, status):
-        if status == states.SUCCESS:
-            return self.prepare_value(result)
-        elif status in self.EXCEPTION_STATES:
+        if status in self.EXCEPTION_STATES:
             return self.prepare_exception(result)
+        else:
+            return self.prepare_value(result)
 
     def store_result(self, task_id, result, status):
         """Store the result and status of a task."""
         raise NotImplementedError(
                 "store_result is not supported by this backend.")
+
+    def mark_as_started(self, task_id):
+        """Mark a task as started"""
+        return self.store_result(task_id, None, status=states.STARTED)
 
     def mark_as_done(self, task_id, result):
         """Mark task as successfully executed."""
@@ -51,6 +51,10 @@ class BaseBackend(object):
         return self.store_result(task_id, exc, status=states.RETRY,
                                  traceback=traceback)
 
+    def mark_as_revoked(self, task_id):
+        return self.store_result(task_id, TaskRevokedError(),
+                                 status=states.REVOKED, traceback=None)
+
     def prepare_exception(self, exc):
         """Prepare exception for serialization."""
         return get_pickleable_exception(exc)
@@ -62,10 +66,6 @@ class BaseBackend(object):
     def prepare_value(self, result):
         """Prepare value for storage."""
         return result
-
-    def is_successful(self, task_id):
-        """Returns ``True`` if the task was successfully executed."""
-        return self.get_status(task_id) == states.SUCCESS
 
     def wait_for(self, task_id, timeout=None):
         """Wait for task and return its result.
@@ -86,7 +86,7 @@ class BaseBackend(object):
             status = self.get_status(task_id)
             if status == states.SUCCESS:
                 return self.get_result(task_id)
-            elif status == states.FAILURE:
+            elif status in states.PROPAGATE_STATES:
                 raise self.get_result(task_id)
             # avoid hammering the CPU checking status.
             time.sleep(sleep_inbetween)
@@ -141,11 +141,10 @@ class BaseBackend(object):
 
 class BaseDictBackend(BaseBackend):
 
-    capabilities = ["ResultStore"]
-
     def __init__(self, *args, **kwargs):
         super(BaseDictBackend, self).__init__(*args, **kwargs)
-        self._cache = LocalCache(limit=conf.MAX_CACHED_RESULTS)
+        self._cache = LocalCache(limit=kwargs.get("max_cached_results") or
+                                 conf.MAX_CACHED_RESULTS)
 
     def store_result(self, task_id, result, status, traceback=None):
         """Store task result and status."""
@@ -158,7 +157,7 @@ class BaseDictBackend(BaseBackend):
 
     def get_traceback(self, task_id):
         """Get the traceback for a failed task."""
-        return self.get_task_meta(task_id)["traceback"]
+        return self.get_task_meta(task_id).get("traceback")
 
     def get_result(self, task_id):
         """Get the result of a task."""

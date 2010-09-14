@@ -5,7 +5,9 @@ import sys
 import __builtin__
 from StringIO import StringIO
 
-from billiard.utils.functional import wraps
+from nose import SkipTest
+
+from celery.utils.functional import wraps
 
 
 class GeneratorContextManager(object):
@@ -77,6 +79,19 @@ def eager_tasks():
     conf.ALWAYS_EAGER = prev
 
 
+def with_eager_tasks(fun):
+
+    @wraps(fun)
+    def _inner(*args, **kwargs):
+        from celery import conf
+        prev = conf.ALWAYS_EAGER
+        conf.ALWAYS_EAGER = True
+        try:
+            return fun(*args, **kwargs)
+        finally:
+            conf.ALWAYS_EAGER = prev
+
+
 def with_environ(env_name, env_value):
 
     def _envpatched(fun):
@@ -117,9 +132,8 @@ def skip_if_environ(env_var_name):
         @wraps(fun)
         def _skips_if_environ(*args, **kwargs):
             if os.environ.get(env_var_name):
-                sys.stderr.write("SKIP %s: %s set\n" % (
+                raise SkipTest("SKIP %s: %s set\n" % (
                     fun.__name__, env_var_name))
-                return
             return fun(*args, **kwargs)
 
         return _skips_if_environ
@@ -137,7 +151,7 @@ def _skip_test(reason, sign):
 
         @wraps(fun)
         def _skipped_test(*args, **kwargs):
-            sys.stderr.write("%s: %s " % (sign, reason))
+            raise SkipTest("%s: %s" % (sign, reason))
 
         return _skipped_test
     return _wrap_test

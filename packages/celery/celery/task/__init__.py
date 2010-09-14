@@ -3,13 +3,15 @@
 Working with tasks and task sets.
 
 """
-from billiard.serialization import pickle
 
 from celery.execute import apply_async
 from celery.registry import tasks
-from celery.task.base import Task, TaskSet, PeriodicTask, ExecuteRemoteTask
+from celery.serialization import pickle
+from celery.task.base import Task, PeriodicTask
+from celery.task.sets import TaskSet
+from celery.task.builtins import PingTask, ExecuteRemoteTask
+from celery.task.builtins import AsynchronousMapTask, _dmap
 from celery.task.control import discard_all
-from celery.task.builtins import PingTask
 from celery.task.http import HttpDispatchTask
 
 __all__ = ["Task", "TaskSet", "PeriodicTask", "tasks", "discard_all",
@@ -27,14 +29,14 @@ def dmap(fun, args, timeout=None):
         [4, 8, 16]
 
     """
-    return TaskSet.map(fun, args, timeout=timeout)
+    return _dmap(fun, args, timeout)
 
 
 def dmap_async(fun, args, timeout=None):
     """Distribute processing of the arguments and collect the results
     asynchronously.
 
-    :returns: :class:`celery.result.AsyncResult` object.
+    :returns :class:`celery.result.AsyncResult`:
 
     Example
 
@@ -49,7 +51,7 @@ def dmap_async(fun, args, timeout=None):
         [4, 8, 16]
 
     """
-    return TaskSet.map_async(fun, args, timeout=timeout)
+    return AsynchronousMapTask.delay(pickle.dumps(fun), args, timeout=timeout)
 
 
 def execute_remote(fun, *args, **kwargs):
@@ -62,7 +64,7 @@ def execute_remote(fun, *args, **kwargs):
     The object must be picklable, so you can't use lambdas or functions
     defined in the REPL (the objects must have an associated module).
 
-    :returns: class:`celery.result.AsyncResult`.
+    :returns class:`celery.result.AsyncResult`:
 
     """
     return ExecuteRemoteTask.delay(pickle.dumps(fun), args, kwargs)

@@ -3,7 +3,7 @@ interface"""
 
 import sys
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 __author__ = "Rune Halvorsen <runefh@gmail.com>"
 __homepage__ = "http://bitbucket.org/runeh/anyjson/"
 __docformat__ = "restructuredtext"
@@ -123,3 +123,5 @@ else:
 
     serialize = lambda value: implementation.serialize(value)
     deserialize = lambda value: implementation.deserialize(value)
+    dumps = serialize
+    loads = deserialize

@@ -2,9 +2,8 @@ from setuptools import setup, find_packages
 
 author = "Rune Halvorsen"
 email = "runefh@gmail.com"
-version = "0.2.4"
-desc = """Wraps the best available JSON implementation available in a common
-interface"""
+version = "0.2.5"
+desc = """Wraps the best available JSON implementation available in a common interface"""
 
 setup(name='anyjson',
       version=version,

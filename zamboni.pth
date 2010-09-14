@@ -1,12 +1,11 @@
 packages/amqplib
 packages/anyjson
 packages/Babel
-packages/billiard
 packages/carrot
 packages/celery
 packages/coverage
+packages/django-celery
 packages/django-picklefield/src
-packages/django-pylibmc
 packages/docutils
 packages/Fabric
 packages/GitPython/lib
@@ -26,8 +25,8 @@ packages/phpserialize
 packages/pycrypto
 packages/pyflakes
 packages/Pygments
-packages/pylibmc
 packages/pylint
+packages/pyparsing
 packages/pyquery
 packages/python-dateutil
 packages/python-memcached
@@ -37,6 +36,7 @@ packages/selenium/src
 packages/setuptools
 packages/South
 packages/Sphinx
+packages/sqlalchemy
 packages/sqlparse
 packages/suds
 packages/translate-toolkit

@@ -1,28 +1,24 @@
-"""
-
-Jobs Executable by the Worker Server.
-
-"""
 import sys
 import time
 import socket
 import warnings
 
-from django.core.mail import mail_admins
-
 from celery import conf
+from celery import log
 from celery import platform
-from celery.log import get_default_logger
-from celery.utils import noop, fun_takes_kwargs
-from celery.loaders import current_loader
-from celery.execute.trace import TaskTrace
-from celery.registry import tasks
 from celery.datastructures import ExceptionInfo
+from celery.execute.trace import TaskTrace
+from celery.loaders import current_loader
+from celery.registry import tasks
+from celery.utils import noop, kwdict, fun_takes_kwargs
+from celery.utils.compat import any
+from celery.utils.mail import mail_admins
+from celery.worker import state
 
 # pep8.py borks on a inline signature separator and
 # says "trailing whitespace" ;)
 EMAIL_SIGNATURE_SEP = "-- "
-TASK_FAIL_EMAIL_BODY = """
+TASK_ERROR_EMAIL_BODY = """
 Task %%(name)s with id %%(id)s raised exception: %%(exc)s
 
 
@@ -70,7 +66,7 @@ class WorkerTaskTrace(TaskTrace):
     :param args: List of positional args to pass on to the function.
     :param kwargs: Keyword arguments mapping to pass on to the function.
 
-    :returns: the function return value on success, or
+    :returns: the evaluated functions return value on success, or
         the exception instance on failure.
 
     """
@@ -99,8 +95,13 @@ class WorkerTaskTrace(TaskTrace):
     def execute(self):
         """Execute, trace and store the result of the task."""
         self.loader.on_task_init(self.task_id, self.task)
-        self.task.backend.process_cleanup()
-        return super(WorkerTaskTrace, self).execute()
+        if self.task.track_started:
+            self.task.backend.mark_as_started(self.task_id)
+        try:
+            return super(WorkerTaskTrace, self).execute()
+        finally:
+            self.task.backend.process_cleanup()
+            self.loader.on_process_cleanup()
 
     def handle_success(self, retval, *args):
         """Handle successful execution."""
@@ -125,6 +126,13 @@ class WorkerTaskTrace(TaskTrace):
 
 
 def execute_and_trace(task_name, *args, **kwargs):
+    """This is a pickleable method used as a target when applying to pools.
+
+    It's the same as::
+
+        >>> WorkerTaskTrace(task_name, *args, **kwargs).execute_safe()
+
+    """
     platform.set_mp_process_title("celeryd", info=task_name)
     try:
         return WorkerTaskTrace(task_name, *args, **kwargs).execute_safe()
@@ -132,16 +140,12 @@ def execute_and_trace(task_name, *args, **kwargs):
         platform.set_mp_process_title("celeryd")
 
 
-class TaskWrapper(object):
-    """Class wrapping a task to be passed around and finally
-    executed inside of the worker.
+class TaskRequest(object):
+    """A request for task execution.
 
     :param task_name: see :attr:`task_name`.
-
     :param task_id: see :attr:`task_id`.
-
     :param args: see :attr:`args`
-
     :param kwargs: see :attr:`kwargs`.
 
     .. attribute:: task_name
@@ -160,29 +164,51 @@ class TaskWrapper(object):
 
         Mapping of keyword arguments to apply to the task.
 
+    .. attribute:: on_ack
+
+        Callback called when the task should be acknowledged.
+
     .. attribute:: message
 
         The original message sent. Used for acknowledging the message.
 
-    .. attribute executed
+    .. attribute:: executed
 
-    Set if the task has been executed. A task should only be executed
-    once.
+        Set to ``True`` if the task has been executed.
+        A task should only be executed once.
+
+    .. attribute:: delivery_info
+
+        Additional delivery info, e.g. the contains the path
+        from producer to consumer.
+
+    .. attribute:: acknowledged
+
+        Set to ``True`` if the task has been acknowledged.
 
     """
+    # Logging output
     success_msg = "Task %(name)s[%(id)s] processed: %(return_value)s"
-    fail_msg = """
+    error_msg = """
         Task %(name)s[%(id)s] raised exception: %(exc)s\n%(traceback)s
     """
-    fail_email_subject = """
+
+    # E-mails
+    email_subject = """
         [celery@%(hostname)s] Error: Task %(name)s (%(id)s): %(exc)s
     """
-    fail_email_body = TASK_FAIL_EMAIL_BODY
+    email_body = TASK_ERROR_EMAIL_BODY
+
+    # Internal flags
     executed = False
+    acknowledged = False
     time_start = None
+    _already_revoked = False
 
     def __init__(self, task_name, task_id, args, kwargs,
-            on_ack=noop, retries=0, delivery_info=None, **opts):
+            on_ack=noop, retries=0, delivery_info=None, hostname=None,
+            email_subject=None, email_body=None, logger=None,
+            eventer=None, **opts):
         self.task_name = task_name
         self.task_id = task_id
         self.retries = retries
@@ -190,29 +216,36 @@ class TaskWrapper(object):
         self.kwargs = kwargs
         self.on_ack = on_ack
         self.delivery_info = delivery_info or {}
+        self.hostname = hostname or socket.gethostname()
+        self.logger = logger or log.get_default_logger()
+        self.eventer = eventer
+        self.email_subject = email_subject or self.email_subject
+        self.email_body = email_body or self.email_body
+
         self.task = tasks[self.task_name]
 
-        for opt in ("success_msg", "fail_msg", "fail_email_subject",
-                "fail_email_body", "logger", "eventer"):
-            setattr(self, opt, opts.get(opt, getattr(self, opt, None)))
-        if not self.logger:
-            self.logger = get_default_logger()
-
-    def __repr__(self):
-        return '<%s: {name:"%s", id:"%s", args:"%s", kwargs:"%s"}>' % (
-                self.__class__.__name__,
-                self.task_name, self.task_id,
-                self.args, self.kwargs)
+    def revoked(self):
+        if self._already_revoked:
+            return True
+        if self.task_id in state.revoked:
+            self.logger.warn("Skipping revoked task: %s[%s]" % (
+                self.task_name, self.task_id))
+            self.send_event("task-revoked", uuid=self.task_id)
+            self.acknowledge()
+            self._already_revoked = True
+            return True
+        return False
 
     @classmethod
-    def from_message(cls, message, message_data, logger=None, eventer=None):
-        """Create a :class:`TaskWrapper` from a task message sent by
+    def from_message(cls, message, message_data, logger=None, eventer=None,
+            hostname=None):
+        """Create a :class:`TaskRequest` from a task message sent by
         :class:`celery.messaging.TaskPublisher`.
 
         :raises UnknownTaskError: if the message does not describe a task,
             the message is also rejected.
 
-        :returns: :class:`TaskWrapper` instance.
+        :returns :class:`TaskRequest`:
 
         """
         task_name = message_data["task"]
@@ -229,14 +262,10 @@ class TaskWrapper(object):
         if not hasattr(kwargs, "items"):
             raise InvalidTaskError("Task kwargs must be a dictionary.")
 
-        # Convert any unicode keys in the keyword arguments to ascii.
-        kwargs = dict((key.encode("utf-8"), value)
-                        for key, value in kwargs.items())
-
-        return cls(task_name, task_id, args, kwargs,
-                    retries=retries, on_ack=message.ack,
-                    delivery_info=delivery_info,
-                    logger=logger, eventer=eventer)
+        return cls(task_name, task_id, args, kwdict(kwargs),
+                   retries=retries, on_ack=message.ack,
+                   delivery_info=delivery_info, logger=logger,
+                   eventer=eventer, hostname=hostname)
 
     def extend_with_default_kwargs(self, loglevel, logfile):
         """Extend the tasks keyword arguments with standard task arguments.
@@ -283,14 +312,19 @@ class TaskWrapper(object):
         :keyword logfile: The logfile used by the task.
 
         """
+        if self.revoked():
+            return
         # Make sure task has not already been executed.
         self._set_executed_bit()
 
         # acknowledge task as being processed.
-        self.on_ack()
+        if not self.task.acks_late:
+            self.acknowledge()
 
         tracer = WorkerTaskTrace(*self._get_tracer_args(loglevel, logfile))
-        return tracer.execute()
+        retval = tracer.execute()
+        self.acknowledge()
+        return retval
 
     def send_event(self, type, **fields):
         if self.eventer:
@@ -305,28 +339,53 @@ class TaskWrapper(object):
 
         :keyword logfile: The logfile used by the task.
 
-        :returns :class:`multiprocessing.AsyncResult` instance.
-
         """
+        if self.revoked():
+            return
         # Make sure task has not already been executed.
         self._set_executed_bit()
-
-        self.send_event("task-accepted", uuid=self.task_id)
 
         args = self._get_tracer_args(loglevel, logfile)
         self.time_start = time.time()
         result = pool.apply_async(execute_and_trace, args=args,
+                    accept_callback=self.on_accepted,
+                    timeout_callback=self.on_timeout,
                     callbacks=[self.on_success], errbacks=[self.on_failure])
-        self.on_ack()
         return result
+
+    def on_accepted(self):
+        state.task_accepted(self)
+        if not self.task.acks_late:
+            self.acknowledge()
+        self.send_event("task-started", uuid=self.task_id)
+        self.logger.debug("Task accepted: %s[%s]" % (
+            self.task_name, self.task_id))
+
+    def on_timeout(self, soft):
+        state.task_ready(self)
+        if soft:
+            self.logger.warning("Soft time limit exceeded for %s[%s]" % (
+                self.task_name, self.task_id))
+        else:
+            self.logger.error("Hard time limit exceeded for %s[%s]" % (
+                self.task_name, self.task_id))
+
+    def acknowledge(self):
+        if not self.acknowledged:
+            self.on_ack()
+            self.acknowledged = True
 
     def on_success(self, ret_value):
         """The handler used if the task was successfully processed (
         without raising an exception)."""
+        state.task_ready(self)
+
+        if self.task.acks_late:
+            self.acknowledge()
 
         runtime = time.time() - self.time_start
         self.send_event("task-succeeded", uuid=self.task_id,
-                        result=ret_value, runtime=runtime)
+                        result=repr(ret_value), runtime=runtime)
 
         msg = self.success_msg.strip() % {
                 "id": self.task_id,
@@ -336,26 +395,57 @@ class TaskWrapper(object):
 
     def on_failure(self, exc_info):
         """The handler used if the task raised an exception."""
+        state.task_ready(self)
+
+        if self.task.acks_late:
+            self.acknowledge()
 
         self.send_event("task-failed", uuid=self.task_id,
-                                       exception=exc_info.exception,
+                                       exception=repr(exc_info.exception),
                                        traceback=exc_info.traceback)
 
-        context = {
-            "hostname": socket.gethostname(),
-            "id": self.task_id,
-            "name": self.task_name,
-            "exc": exc_info.exception,
-            "traceback": exc_info.traceback,
-            "args": self.args,
-            "kwargs": self.kwargs,
-        }
-        self.logger.error(self.fail_msg.strip() % context)
+        context = {"hostname": self.hostname,
+                   "id": self.task_id,
+                   "name": self.task_name,
+                   "exc": repr(exc_info.exception),
+                   "traceback": unicode(exc_info.traceback, 'utf-8'),
+                   "args": self.args,
+                   "kwargs": self.kwargs}
+        self.logger.error(self.error_msg.strip() % context)
 
         task_obj = tasks.get(self.task_name, object)
-        send_error_email = conf.CELERY_SEND_TASK_ERROR_EMAILS and not \
-                                task_obj.disable_error_emails
-        if send_error_email:
-            subject = self.fail_email_subject.strip() % context
-            body = self.fail_email_body.strip() % context
-            mail_admins(subject, body, fail_silently=True)
+        self.send_error_email(task_obj, context, exc_info.exception,
+                              whitelist=conf.CELERY_TASK_ERROR_WHITELIST,
+                              enabled=conf.CELERY_SEND_TASK_ERROR_EMAILS)
+
+    def send_error_email(self, task, context, exc,
+            whitelist=None, enabled=False, fail_silently=True):
+        if enabled and not task.disable_error_emails:
+            if whitelist:
+                if not isinstance(exc, tuple(whitelist)):
+                    return
+            subject = self.email_subject.strip() % context
+            body = self.email_body.strip() % context
+            return mail_admins(subject, body, fail_silently=fail_silently)
+
+    def __repr__(self):
+        return '<%s: {name:"%s", id:"%s", args:"%s", kwargs:"%s"}>' % (
+                self.__class__.__name__,
+                self.task_name, self.task_id,
+                self.args, self.kwargs)
+
+    def info(self, safe=False):
+        args = self.args
+        kwargs = self.kwargs
+        if not safe:
+            args = repr(args)
+            kwargs = repr(self.kwargs)
+
+        return {"id": self.task_id,
+                "name": self.task_name,
+                "args": args,
+                "kwargs": kwargs,
+                "hostname": self.hostname,
+                "time_start": self.time_start,
+                "acknowledged": self.acknowledged,
+                "delivery_info": self.delivery_info}

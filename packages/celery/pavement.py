@@ -25,12 +25,20 @@ def html(options):
 
 
 @task
+@needs("paver.doctools.html")
+def qhtml(options):
+    destdir = path("Documentation")
+    builtdocs = sphinx_builddir(options)
+    sh("rsync -az %s/ %s" % (builtdocs, destdir))
+
+
+@task
 @needs("clean_docs", "paver.doctools.html")
 def ghdocs(options):
     builtdocs = sphinx_builddir(options)
     sh("sphinx-to-github", cwd=builtdocs)
     sh("git checkout gh-pages && \
-            cp -r '%s/*' .    && \
+            cp -r %s/* .    && \
             git commit . -m 'Rendered documentation for Github Pages.' && \
             git push origin gh-pages && \
             git checkout master" % builtdocs)
@@ -90,14 +98,14 @@ def bump(options):
     ("verbose", "V", "Make more noise"),
 ])
 def test(options):
-    cmd = "python manage.py test"
+    cmd = "CELERY_LOADER=default nosetests"
     if getattr(options, "coverage", False):
-        cmd += " --coverage"
+        cmd += " --with-coverage3"
     if getattr(options, "quick", False):
-        cmd = "env QUICKTEST=1 SKIP_RLIMITS=1 %s" % cmd
+        cmd = "QUICKTEST=1 SKIP_RLIMITS=1 %s" % cmd
     if getattr(options, "verbose", False):
         cmd += " --verbosity=2"
-    sh(cmd, cwd="tests")
+    sh(cmd)
 
 
 @task
