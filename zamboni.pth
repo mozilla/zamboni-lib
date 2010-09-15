@@ -14,6 +14,9 @@ packages/httplib2/python2
 packages/importlib
 packages/ipython
 packages/Jinja2
+packages/lockfile
+# logilab-common has a daemon.py, so this must come first.
+packages/python-daemon
 packages/logilab-astng
 packages/logilab-common
 packages/lxml
