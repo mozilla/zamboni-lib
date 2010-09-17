@@ -6,6 +6,7 @@ packages/celery
 packages/coverage
 packages/django-celery
 packages/django-picklefield/src
+packages/django-uuidfield
 packages/docutils
 packages/Fabric
 packages/GitPython/lib
