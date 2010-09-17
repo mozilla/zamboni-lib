@@ -1,0 +1,9 @@
+#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
+# EASY-INSTALL-ENTRY-SCRIPT: 'Sphinx==0.6.3','console_scripts','sphinx-quickstart'
+__requires__ = 'Sphinx==0.6.3'
+import sys
+from pkg_resources import load_entry_point
+
+sys.exit(
+   load_entry_point('Sphinx==0.6.3', 'console_scripts', 'sphinx-quickstart')()
+)

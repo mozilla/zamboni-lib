@@ -1,0 +1,9 @@
+#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
+# EASY-INSTALL-ENTRY-SCRIPT: 'celery==2.0.3','console_scripts','camqadm'
+__requires__ = 'celery==2.0.3'
+import sys
+from pkg_resources import load_entry_point
+
+sys.exit(
+   load_entry_point('celery==2.0.3', 'console_scripts', 'camqadm')()
+)

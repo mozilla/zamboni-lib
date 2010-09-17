@@ -1,0 +1,9 @@
+#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
+# EASY-INSTALL-ENTRY-SCRIPT: 'coverage==3.2b4','console_scripts','coverage'
+__requires__ = 'coverage==3.2b4'
+import sys
+from pkg_resources import load_entry_point
+
+sys.exit(
+   load_entry_point('coverage==3.2b4', 'console_scripts', 'coverage')()
+)

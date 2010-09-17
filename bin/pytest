@@ -1,0 +1,4 @@
+#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6 -u
+
+from logilab.common.pytest import run
+run()

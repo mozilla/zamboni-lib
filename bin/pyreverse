@@ -1,0 +1,4 @@
+#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
+import sys
+from pylint.pyreverse import main
+main.Run(sys.argv[1:])
