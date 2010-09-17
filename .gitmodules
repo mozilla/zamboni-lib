@@ -73,3 +73,6 @@
 [submodule "src/python-oauth2"]
 	path = src/python-oauth2
 	url = git://github.com/simplegeo/python-oauth2.git
+[submodule "src/amo-validator"]
+	path = src/amo-validator
+	url = git://github.com/mattbasta/amo-validator.git

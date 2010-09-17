@@ -1,9 +1,11 @@
 packages/amqplib
+packages/argparse
 packages/anyjson
 packages/Babel
 packages/carrot
 packages/celery
 packages/coverage
+packages/cssutils/src
 packages/django-celery
 packages/django-picklefield/src
 packages/django-uuidfield
@@ -35,6 +37,7 @@ packages/pyquery
 packages/python-dateutil
 packages/python-memcached
 packages/pytz
+packages/rdflib
 packages/recaptcha-client
 packages/selenium/src
 packages/setuptools
