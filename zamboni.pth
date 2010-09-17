@@ -21,6 +21,7 @@ src/hera
 src/jingo
 src/jingo-minify
 src/python-oauth2
+src/redis
 src/schematic
 src/test-utils
 src/tower
