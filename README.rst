@@ -11,7 +11,7 @@ To keep it up to date::
     pushd vendor && git pull && git submodule update --init && popd
 
 
-How zamboni-lib was Made
+How zamboni-lib was made
 ------------------------
 
 ::
@@ -20,10 +20,7 @@ How zamboni-lib was Made
 
     # ..delete some junk from vendor/lib/python...
 
-    # Create the .pth file so Python can find our libs.
-    # The first line gets all the normal packages.
-    # The second line gets all the src packages.
-    echo "import site; site.addsitedir('vendor/lib/python')" > zamboni.pth
+    # Create the .pth file so Python can find our src libs.
     find src -type d -depth 1 >> zamboni.pth
 
     # Add all the submodules.
@@ -31,3 +28,18 @@ How zamboni-lib was Made
         pushd $f >/dev/null && REPO=$(git config remote.origin.url) && popd > /dev/null && git submodule add $REPO $f
     done
     git add .
+
+
+Using your own vendor lib
+-------------------------
+
+We add these lines to our manage.py file, since it's the entrypoint to
+everything we do in zamboni.  Adjust as you see fit. ::
+
+    import site
+    site.addsitedir('vendor')
+    site.addsitedir('vendor/lib/python')
+
+``addsitedir`` adds that directory to the Python path and looks for other
+``.pth`` files in that dir.  We use a ``.pth`` in vendor to load our ``src/``
+packages, and pip may have added other ``.pth`` files in ``vendor/lib/python``.

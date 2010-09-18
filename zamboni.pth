@@ -1,4 +1,3 @@
-import site; site.addsitedir('vendor/lib/python')
 src/amo-validator
 src/bleach
 src/cache-panel
