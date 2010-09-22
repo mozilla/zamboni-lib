@@ -76,3 +76,18 @@
 [submodule "src/tower"]
 	path = src/tower
 	url = git://github.com/clouserw/tower.git
+[submodule "src/easy-thumbnails"]
+	path = src/easy-thumbnails
+	url = git://github.com/SmileyChris/easy-thumbnails.git
+[submodule "src/happyforms"]
+	path = src/happyforms
+	url = git://github.com/mozilla/happyforms.git
+[submodule "src/django-recaptcha"]
+	path = src/django-recaptcha
+	url = git://github.com/mozilla/django-recaptcha.git
+[submodule "src/redis"]
+	path = src/redis
+	url = git://github.com/jbalogh/redis-py
+[submodule "src/pymongo"]
+	path = src/pymongo
+	url = git://github.com/mongodb/mongo-python-driver.git
