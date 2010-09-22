@@ -61,6 +61,9 @@
 [submodule "src/jingo-minify"]
 	path = src/jingo-minify
 	url = git://github.com/jsocol/jingo-minify.git
+[submodule "src/pymongo"]
+	path = src/pymongo
+	url = git://github.com/mongodb/mongo-python-driver.git
 [submodule "src/python-oauth2"]
 	path = src/python-oauth2
 	url = git://github.com/simplegeo/python-oauth2.git
@@ -76,18 +79,3 @@
 [submodule "src/tower"]
 	path = src/tower
 	url = git://github.com/clouserw/tower.git
-[submodule "src/easy-thumbnails"]
-	path = src/easy-thumbnails
-	url = git://github.com/SmileyChris/easy-thumbnails.git
-[submodule "src/happyforms"]
-	path = src/happyforms
-	url = git://github.com/mozilla/happyforms.git
-[submodule "src/django-recaptcha"]
-	path = src/django-recaptcha
-	url = git://github.com/mozilla/django-recaptcha.git
-[submodule "src/redis"]
-	path = src/redis
-	url = git://github.com/jbalogh/redis-py
-[submodule "src/pymongo"]
-	path = src/pymongo
-	url = git://github.com/mongodb/mongo-python-driver.git
