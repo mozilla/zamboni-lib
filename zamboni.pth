@@ -19,6 +19,7 @@ src/happyforms
 src/hera
 src/jingo
 src/jingo-minify
+src/nuggets
 src/python-oauth2
 src/pymongo
 src/redis

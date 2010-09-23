@@ -79,3 +79,6 @@
 [submodule "src/tower"]
 	path = src/tower
 	url = git://github.com/clouserw/tower.git
+[submodule "src/nuggets"]
+	path = src/nuggets
+	url = git://github.com/mozilla/nuggets.git
