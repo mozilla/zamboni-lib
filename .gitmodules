@@ -19,6 +19,9 @@
 [submodule "src/django-cache-machine"]
 	path = src/django-cache-machine
 	url = git://github.com/jbalogh/django-cache-machine.git
+[submodule "src/django-csp"]
+	path = src/django-csp
+	url = git://github.com/mozilla/django-csp.git
 [submodule "src/django-debug-toolbar"]
 	path = src/django-debug-toolbar
 	url = git://github.com/robhudson/django-debug-toolbar.git
