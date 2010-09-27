@@ -1,9 +1,10 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
+#!/Users/jeff/.dotfiles/.virtualenvs/zamboni/bin/python2.6
 # EASY-INSTALL-ENTRY-SCRIPT: 'ipython==0.10','console_scripts','pycolor'
 __requires__ = 'ipython==0.10'
 import sys
 from pkg_resources import load_entry_point
 
-sys.exit(
-   load_entry_point('ipython==0.10', 'console_scripts', 'pycolor')()
-)
+if __name__ == '__main__':
+    sys.exit(
+        load_entry_point('ipython==0.10', 'console_scripts', 'pycolor')()
+    )
