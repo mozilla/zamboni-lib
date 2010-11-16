@@ -108,7 +108,7 @@ class PickledObjectField(models.Field):
                     raise
         return value
 
-    def get_db_prep_value(self, value):
+    def get_db_prep_value(self, value, connection=None, prepared=False):
         """
         Pickle and b64encode the object, optionally compressing it.
 
@@ -136,12 +136,19 @@ class PickledObjectField(models.Field):
     def get_internal_type(self):
         return 'TextField'
 
-    def get_db_prep_lookup(self, lookup_type, value):
+    def get_db_prep_lookup(self, lookup_type, value, connection=None, prepared=False):
         if lookup_type not in ['exact', 'in', 'isnull']:
             raise TypeError('Lookup type %s is not supported.' % lookup_type)
         # The Field model already calls get_db_prep_value before doing the
         # actual lookup, so all we need to do is limit the lookup types.
-        return super(PickledObjectField, self).get_db_prep_lookup(lookup_type, value)
+        try:
+            return super(PickledObjectField, self).get_db_prep_lookup(
+                lookup_type, value, connection=connection, prepared=prepared)
+        except TypeError:
+            # Try not to break on older versions of Django, where the
+            # `connection` and `prepared` parameters are not available.
+            return super(PickledObjectField, self).get_db_prep_lookup(
+                lookup_type, value)
 
 
 # South support; see http://south.aeracode.org/docs/tutorial/part4.html#simple-inheritance
