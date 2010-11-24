@@ -85,3 +85,6 @@
 [submodule "src/nuggets"]
 	path = src/nuggets
 	url = git://github.com/mozilla/nuggets.git
+[submodule "src/django-qunit"]
+	path = src/django-qunit
+	url = git://github.com/kumar303/django-qunit.git
