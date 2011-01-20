@@ -16,6 +16,7 @@ src/django-piston
 src/django-queryset-transform
 src/django-qunit
 src/django-recaptcha
+src/django-tables
 src/easy-thumbnails
 src/happyforms
 src/hera

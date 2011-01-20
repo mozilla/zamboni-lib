@@ -88,3 +88,6 @@
 [submodule "src/django-qunit"]
 	path = src/django-qunit
 	url = git://github.com/kumar303/django-qunit.git
+[submodule "src/django-tables"]
+	path = src/django-tables
+	url = git://github.com/miracle2k/django-tables.git
