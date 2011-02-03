@@ -91,3 +91,6 @@
 [submodule "src/django-tables"]
 	path = src/django-tables
 	url = git://github.com/miracle2k/django-tables.git
+[submodule "src/django-mobility"]
+	path = src/django-mobility
+	url = git://github.com/jbalogh/django-mobility.git
