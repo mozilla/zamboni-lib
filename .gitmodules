@@ -94,3 +94,6 @@
 [submodule "src/django-mobility"]
 	path = src/django-mobility
 	url = git://github.com/jbalogh/django-mobility.git
+[submodule "src/fastchardet"]
+	path = src/fastchardet
+	url = git://github.com/mattbasta/fastchardet

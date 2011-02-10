@@ -19,6 +19,7 @@ src/django-qunit
 src/django-recaptcha
 src/django-tables
 src/easy-thumbnails
+src/fastchardet
 src/happyforms
 src/hera
 src/jingo
