@@ -93,11 +93,13 @@ OVERRIDE_FAILURE = 'InvalidAdmin'
 ACCOUNT_LOCKED = 'AccountLockout'
 PASSWD_RESET_CLR = 'PasswordResetCleared'
 
-_CEF_FORMAT = ('%(date)s %(host)s CEF:%(version)s|%(vendor)s|%(product)s|'
+_LOGGING_FORMAT = ('CEF:%(version)s|%(vendor)s|%(product)s|'
                '%(device_version)s|%(signature)s|%(name)s|%(severity)s|'
                'cs1Label=requestClientApplication cs1=%(user_agent)s '
                'requestMethod=%(method)s request=%(url)s '
                'src=%(source)s dest=%(dest)s suser=%(suser)s')
+
+_CEF_FORMAT = '%(date)s %(host)s ' + _LOGGING_FORMAT
 
 _EXTENSIONS = ['cs1Label', 'cs1', 'requestMethod', 'request', 'src', 'dest',
                'suser']
@@ -244,10 +246,10 @@ def _get_fields(name, severity, environ, config, username=None,
     return fields
 
 
-def _format_msg(fields, kw, maxlen=_MAXLEN):
+def _format_msg(fields, kw, maxlen=_MAXLEN, format=_CEF_FORMAT):
     # adding custom extensions
     # sorting by size
-    msg = _CEF_FORMAT % fields
+    msg = format % fields
     extensions = [(len(str(value)), len(key), key, value)
                     for key, value in kw.items()
                   if key not in _EXTENSIONS]
@@ -324,8 +326,9 @@ class _Formatter(logging.Formatter):
         if not datefmt:
             datefmt = '%H:%M:%s'
         fields['date'] = strftime(datefmt)
-        return _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'))
-
+        record.msg = _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'),
+                                 format=_LOGGING_FORMAT)
+        return logging.Formatter.format(self, record)
 
 class SysLogFormatter(_Formatter):
     def format(self, record):
