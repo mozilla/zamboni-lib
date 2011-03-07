@@ -1,6 +1,6 @@
 [submodule "src/amo-validator"]
 	path = src/amo-validator
-	url = git://github.com/mattbasta/amo-validator.git
+	url = git://github.com/mozilla/amo-validator.git
 [submodule "src/bleach"]
 	path = src/bleach
 	url = git://github.com/jsocol/bleach.git
