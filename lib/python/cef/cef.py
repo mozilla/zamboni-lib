@@ -246,13 +246,15 @@ def _get_fields(name, severity, environ, config, username=None,
     return fields
 
 
-def _format_msg(fields, kw, maxlen=_MAXLEN, format=_CEF_FORMAT):
+def _format_msg(fields, kw, maxlen=_MAXLEN, format=_CEF_FORMAT,
+                extensions=_EXTENSIONS):
     # adding custom extensions
     # sorting by size
     msg = format % fields
+
     extensions = [(len(str(value)), len(key), key, value)
                     for key, value in kw.items()
-                  if key not in _EXTENSIONS]
+                  if key not in extensions]
     extensions.sort()
 
     msg_len = len(msg)
@@ -312,6 +314,17 @@ LEVEL_MAP = {
 
 
 class _Formatter(logging.Formatter):
+    _LOGGING_FORMAT = ('CEF:%(version)s|%(vendor)s|%(product)s|'
+               '%(device_version)s|%(signature)s|%(name)s|%(severity)s|'
+               'src=%(source)s dest=%(dest)s '
+               'requestClientApplication=%(user_agent)s '
+               'requestMethod=%(method)s request=%(url)s '
+               'suser=%(suser)s')
+    _EXTENSIONS = ['requestMethod', 'request', 'src', 'dest', 'suser']
+
+    def getMessage(self):
+        return self.record
+
     def format(self, record):
         kw = record.args
         fields = _get_fields(record.msg, kw['severity'], kw['environ'],
@@ -322,15 +335,22 @@ class _Formatter(logging.Formatter):
                              username=kw.get('username'),
                              signature=kw.get('signature'))
 
-        datefmt = getattr(self, 'datefmt', None)
-        if not datefmt:
-            datefmt = '%H:%M:%s'
-        fields['date'] = strftime(datefmt)
         record.msg = _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'),
-                                 format=_LOGGING_FORMAT)
+                                 format=self._LOGGING_FORMAT,
+                                 extensions=self._EXTENSIONS)
         return logging.Formatter.format(self, record)
 
+
 class SysLogFormatter(_Formatter):
+
+    def format_data(self, data):
+        result = {}
+        for num, row in enumerate(data.items(), 1):
+            result['cs%sLabel' % num] = row[0]
+            result['cs%s' % num] = row[1]
+        return result
+
     def format(self, record):
         record.args['severity'] = LEVEL_MAP[record.levelno]
+        record.args['data'] = self.format_data(record.args['data'])
         return _Formatter.format(self, record)

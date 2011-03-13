@@ -33,7 +33,6 @@
 # the terms of any one of the MPL, the GPL or the LGPL.
 #
 # ***** END LICENSE BLOCK *****
-from datetime import datetime
 import logging
 import os
 import syslog
@@ -181,27 +180,34 @@ class TestCEFFormatter(unittest.TestCase):
                         'PATH_INFO': '/', 'REQUEST_METHOD': 'GET',
                         'HTTP_USER_AGENT': 'MySuperBrowser'}
 
-        class record:
-            level = 'foo'
-            msg = 'Test message'
-            args = {'severity': 1, 'environ': self.environ, 'data': {}}
-        self.record = record()
+        self.record = logging.makeLogRecord({'level': 'foo',
+                                             'msg': 'Test message'})
+        self.record.args = {'severity': 1, 'product': 'AMO',
+                            'environ': self.environ, 'data': {}}
 
-    def test_formatter_no_date(self):
+    def _test_formatter_no_date(self):
         fmt = _Formatter()
         assert fmt.format(self.record)
 
-    def test_formatter_date(self):
-        fmt = _Formatter()
-        fmt.datefmt = '%H:%M'
-        assert (fmt.format(self.record)
-                   .startswith(datetime.today().strftime('%H:%M')))
-
-    def test_formatter_level(self):
+    def _test_formatter_level(self):
         fmt = SysLogFormatter()
         self.record.levelno = logging.DEBUG
         data = fmt.format(self.record)
         assert data.split('|')[6] == str(syslog.LOG_DEBUG)
+
+    def test_formatter_data(self):
+        fmt = SysLogFormatter()
+        self.record.levelno = logging.DEBUG
+        self.record.args['data'] = {'foo': 'bar'}
+        assert 'cs1=bar' in fmt.format(self.record)
+        assert 'cs1Label=foo' in fmt.format(self.record)
+
+    def test_formatter_data_two(self):
+        fmt = SysLogFormatter()
+        self.record.levelno = logging.DEBUG
+        self.record.args['data'] = {'foo': 'bar', 'baz': 'bingo'}
+        assert 'cs1=bar' in fmt.format(self.record)
+        assert 'cs2=bingo' in fmt.format(self.record)
 
 
 if __name__ == '__main__':
