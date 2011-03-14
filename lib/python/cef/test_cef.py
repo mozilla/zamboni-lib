@@ -198,17 +198,24 @@ class TestCEFFormatter(unittest.TestCase):
     def test_formatter_data(self):
         fmt = SysLogFormatter()
         self.record.levelno = logging.DEBUG
-        self.record.args['data'] = {'foo': 'bar'}
-        assert 'cs1=bar' in fmt.format(self.record)
-        assert 'cs1Label=foo' in fmt.format(self.record)
+        self.record.args['data'] = (('foo', 'bar'),)
+        msg = fmt.format(self.record)
+        assert 'cs1=bar' in msg
+        assert 'cs1Label=foo' in msg
 
     def test_formatter_data_two(self):
         fmt = SysLogFormatter()
         self.record.levelno = logging.DEBUG
-        self.record.args['data'] = {'foo': 'bar', 'baz': 'bingo'}
-        assert 'cs1=bar' in fmt.format(self.record)
-        assert 'cs2=bingo' in fmt.format(self.record)
+        self.record.args['data'] = (('foo', 'bar'), ('baz', 'bingo'))
+        msg = fmt.format(self.record)
+        assert 'cs1=bar' in msg
+        assert 'cs2=bingo' in msg
 
+    def test_multiple_interpolation(self):
+        fmt = SysLogFormatter()
+        self.record.levelno = logging.DEBUG
+        self.record.args['data'] = (('foo', '%f'),)
+        assert 'cs1Label=foo' in fmt.format(self.record)
 
 if __name__ == '__main__':
     unittest.main()

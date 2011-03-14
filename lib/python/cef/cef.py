@@ -322,9 +322,6 @@ class _Formatter(logging.Formatter):
                'suser=%(suser)s')
     _EXTENSIONS = ['requestMethod', 'request', 'src', 'dest', 'suser']
 
-    def getMessage(self):
-        return self.record
-
     def format(self, record):
         kw = record.args
         fields = _get_fields(record.msg, kw['severity'], kw['environ'],
@@ -338,6 +335,8 @@ class _Formatter(logging.Formatter):
         record.msg = _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'),
                                  format=self._LOGGING_FORMAT,
                                  extensions=self._EXTENSIONS)
+        # Stop logging trying to interpolate again.
+        record.args = None
         return logging.Formatter.format(self, record)
 
 
@@ -345,7 +344,7 @@ class SysLogFormatter(_Formatter):
 
     def format_data(self, data):
         result = {}
-        for num, row in enumerate(data.items(), 1):
+        for num, row in enumerate(data, 1):
             result['cs%sLabel' % num] = row[0]
             result['cs%s' % num] = row[1]
         return result
