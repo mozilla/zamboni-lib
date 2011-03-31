@@ -97,3 +97,6 @@
 [submodule "src/fastchardet"]
 	path = src/fastchardet
 	url = git://github.com/mattbasta/fastchardet
+[submodule "src/jstestnetlib"]
+	path = src/jstestnetlib
+	url = git://github.com/kumar303/jstestnetlib.git
