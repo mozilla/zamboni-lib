@@ -100,3 +100,6 @@
 [submodule "src/jstestnetlib"]
 	path = src/jstestnetlib
 	url = git://github.com/kumar303/jstestnetlib.git
+[submodule "src/django-quieter-formset"]
+	path = src/django-quieter-formset
+	url = git://github.com/andymckay/django-quieter-formset.git

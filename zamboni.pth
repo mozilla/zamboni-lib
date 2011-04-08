@@ -14,6 +14,7 @@ src/django-mobility
 src/django-multidb-router
 src/django-nose
 src/django-piston
+src/django-quieter-formset
 src/django-queryset-transform
 src/django-qunit
 src/django-recaptcha
