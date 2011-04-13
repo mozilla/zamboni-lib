@@ -19,6 +19,7 @@ src/django-queryset-transform
 src/django-qunit
 src/django-recaptcha
 src/django-tables
+src/django-waffle
 src/easy-thumbnails
 src/fastchardet
 src/happyforms
