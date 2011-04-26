@@ -3,22 +3,25 @@ from collections import namedtuple
 import django.test
 from django import http
 from django.conf.urls.defaults import patterns
+from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
+from django.core import signals
 from django.core.cache import cache
 from django.core.handlers.wsgi import WSGIRequest
 from django.db import close_connection
-from django.shortcuts import render
 from django.template import context
 
 import mock
 
-from session_csrf import CsrfMiddleware, anonymous_csrf
+from session_csrf import CsrfMiddleware, anonymous_csrf, anonymous_csrf_exempt
 
 
 urlpatterns = patterns('',
     ('^$', lambda r: http.HttpResponse()),
     ('^anon$', anonymous_csrf(lambda r: http.HttpResponse())),
+    ('^no-anon-csrf$', anonymous_csrf_exempt(lambda r: http.HttpResponse())),
+    ('^logout$', anonymous_csrf(lambda r: logout(r) or http.HttpResponse())),
 )
 
 
@@ -209,6 +212,29 @@ class TestAnonymousCsrf(django.test.TestCase):
         self.assertIn('anoncsrf', response.cookies)
         self.assertEqual(response['Vary'], 'Cookie')
 
+    def test_anon_csrf_logout(self):
+        # Beware of views that logout the user.
+        self.login()
+        response = self.client.get('/logout')
+        self.assertEqual(response.status_code, 200)
+
+    def test_existing_anon_cookie_not_in_cache(self):
+        response = self.client.get('/anon')
+        self.assertEqual(len(response._request.csrf_token), 32)
+
+        # Clear cache and make sure we still get a token
+        cache.clear()
+        response = self.client.get('/anon')
+        self.assertEqual(len(response._request.csrf_token), 32)
+
+    def test_anonymous_csrf_exempt(self):
+        response = self.client.post('/no-anon-csrf')
+        self.assertEqual(response.status_code, 200)
+
+        self.login()
+        response = self.client.post('/no-anon-csrf')
+        self.assertEqual(response.status_code, 403)
+
 
 class ClientHandler(django.test.client.ClientHandler):
     """
@@ -218,9 +244,6 @@ class ClientHandler(django.test.client.ClientHandler):
     """
 
     def __call__(self, environ):
-        from django.conf import settings
-        from django.core import signals
-
         # Set up middleware if needed. We couldn't do this earlier, because
         # settings weren't available.
         if self._request_middleware is None:
