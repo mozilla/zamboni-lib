@@ -5,6 +5,7 @@ src/check
 src/commonware
 src/django
 src/django-cache-machine
+src/django-cronjobs
 src/django-csp
 src/django-debug-toolbar
 src/django-devserver
