@@ -109,3 +109,6 @@
 [submodule "src/django-waffle"]
 	path = src/django-waffle
 	url = https://github.com/jsocol/django-waffle.git
+[submodule "src/elasticutils"]
+	path = src/elasticutils
+	url = https://github.com/davedash/elasticutils.git

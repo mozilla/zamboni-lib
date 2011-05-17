@@ -35,3 +35,4 @@ src/redis
 src/schematic
 src/test-utils
 src/tower
+src/elasticutils
