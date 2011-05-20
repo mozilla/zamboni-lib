@@ -6,3 +6,4 @@ pip-log.txt
 lxml
 pylibmc
 .gitconfig
+!*.egg-info
