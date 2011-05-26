@@ -112,3 +112,6 @@
 [submodule "src/elasticutils"]
 	path = src/elasticutils
 	url = https://github.com/davedash/elasticutils.git
+[submodule "src/statsd"]
+	path = src/statsd
+	url = git://github.com/jsocol/pystatsd.git
