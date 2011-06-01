@@ -33,6 +33,7 @@ src/python-oauth2
 src/pymongo
 src/redis
 src/schematic
+src/statsd
 src/test-utils
 src/tower
 src/elasticutils
