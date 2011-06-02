@@ -1,3 +1,6 @@
+[submodule "src/addon-packager"]
+	path = src/addon-packager
+	url = git://github.com/mattbasta/addon-packager.git
 [submodule "src/amo-validator"]
 	path = src/amo-validator
 	url = git://github.com/mozilla/amo-validator.git

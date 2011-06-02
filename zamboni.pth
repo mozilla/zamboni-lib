@@ -1,3 +1,4 @@
+src/addon-packager
 src/amo-validator
 src/bleach
 src/cache-panel
