@@ -115,3 +115,6 @@
 [submodule "src/statsd"]
 	path = src/statsd
 	url = git://github.com/jsocol/pystatsd.git
+[submodule "src/addon-sdk-sdocs"]
+	path = src/addon-sdk-sdocs
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
