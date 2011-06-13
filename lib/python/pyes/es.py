@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from __future__ import with_statement
 
-__author__ = 'Alberto Paro, Robert Eanes, Matt Dennewitz'
+__author__ = 'Alberto Paro'
 __all__ = ['ES', 'file_to_attachment', 'decode_json']
 
 try:
@@ -37,10 +38,10 @@ def file_to_attachment(filename):
     """
     Convert a file to attachment
     """
-#    return base64.b64encode(open(filename, 'rb').read())
-    return {'_name':filename,
-            'content':base64.b64encode(open(filename, 'rb').read())
-            }
+    with open(filename, 'rb') as _file:
+        return {'_name':filename,
+                'content':base64.b64encode(_file.read())
+                }
 
 class ESJsonEncoder(json.JSONEncoder):
     def default(self, value):
@@ -142,7 +143,6 @@ class ES(object):
         self.bulk_items = 0
 
         self.info = {} #info about the current server
-        self.mappings = None #track mapping
         self.encoder = encoder
         if self.encoder is None:
             self.encoder = ESJsonEncoder
@@ -190,6 +190,7 @@ class ES(object):
         return self.servers
 
     def _send_request(self, method, path, body=None, params={}):
+        # prepare the request
         if not path.startswith("/"):
             path = "/" + path
         if not self.connection:
@@ -202,7 +203,11 @@ class ES(object):
         request = RestRequest(method=Method._NAMES_TO_VALUES[method.upper()], uri=path, parameters=params, headers={}, body=body)
         if self.dump_curl is not None:
             self._dump_curl_request(request)
+
+        # execute the request
         response = self.connection.execute(request)
+
+        # handle the response
         try:
             decoded = json.loads(response.body, cls=self.decoder)
         except ValueError:
@@ -291,7 +296,7 @@ class ES(object):
         """
         try:
             return self.create_index(index, settings)
-        except pyes.exceptions.AlreadyExistsException, e:
+        except pyes.exceptions.IndexAlreadyExistsException, e:
             return e.result
 
     def delete_index(self, index):
@@ -506,6 +511,13 @@ class ES(object):
         result = self._send_request('POST', path, params=params)
         self.refreshed = True
         return result
+    
+    def analyze(self, text, index=None):
+        """
+        Performs the analysis process on a text and return the tokens breakdown of the text
+        """
+        path = self._make_path([index, '_analyze'])
+        return self._send_request('POST', path, text)
 
     def gateway_snapshot(self, indexes=None):
         """
@@ -538,8 +550,6 @@ class ES(object):
         else:
             path = self._make_path([','.join(indexes), "_mapping"])
         result = self._send_request('GET', path)
-        #processing indexes
-        self.mappings = Mapper(result)
         return result
 
 
@@ -560,19 +570,26 @@ class ES(object):
     def cluster_health(self, indexes=None, level="cluster", wait_for_status=None,
                wait_for_relocating_shards=None, timeout=30):
         """
+        Check the current :ref:`cluster health <es-guide-reference-api-admin-cluster-health>`.
         Request Parameters
 
         The cluster health API accepts the following request parameters:
-        - level:                Can be one of cluster, indices or shards. Controls the details 
-                                level of the health information returned. Defaults to cluster.
-        - wait_for_status       One of green, yellow or red. Will wait (until the timeout provided) 
-                                until the status of the cluster changes to the one provided. 
+        
+        :param level: Can be one of cluster, indices or shards. Controls the 
+                        details level of the health information returned. 
+                        Defaults to *cluster*.
+        :param wait_for_status: One of green, yellow or red. Will wait (until 
+                                the timeout provided) until the status of the 
+                                cluster changes to the one provided. 
                                 By default, will not wait for any status.
-        - wait_for_relocating_shards     A number controlling to how many relocating shards to 
-                                         wait for. Usually will be 0 to indicate to wait till 
-                                         all relocation have happened. Defaults to not to wait.
-        - timeout       A time based parameter controlling how long to wait if one of the 
-                        wait_for_XXX are provided. Defaults to 30s.
+        :param wait_for_relocating_shards: A number controlling to how many 
+                                           relocating shards to wait for. 
+                                           Usually will be 0 to indicate to 
+                                           wait till all relocation have 
+                                           happened. Defaults to not to wait.
+        :param timeout: A time based parameter controlling how long to wait 
+                        if one of the wait_for_XXX are provided. 
+                        Defaults to 30s.
         """
         path = self._make_path(["_cluster", "health"])
         mapping = {}
@@ -588,19 +605,67 @@ class ES(object):
             mapping['timeout'] = "%ds" % timeout
         return self._send_request('GET', path, mapping)
 
-    def cluster_state(self):
+    def cluster_state(self, filter_nodes=None, filter_routing_table=None,
+                      filter_metadata=None, filter_blocks=None,
+                      filter_indices=None):
         """
-        Retrieve the cluster state
+        Retrieve the :ref:`cluster state <es-guide-reference-api-admin-cluster-state>`.
+
+        :param filter_nodes: set to **true** to filter out the **nodes** part 
+                             of the response.                            
+        :param filter_routing_table: set to **true** to filter out the 
+                                     **routing_table** part of the response.                    
+        :param filter_metadata: set to **true** to filter out the **metadata** 
+                                part of the response.                         
+        :param filter_blocks: set to **true** to filter out the **blocks** 
+                              part of the response.                           
+        :param filter_indices: when not filtering metadata, a comma separated 
+                               list of indices to include in the response.   
+
         """
-        return self._send_request('GET', "/_cluster/state")
+        path = self._make_path(["_cluster", "state"])
+        parameters = {}
+
+        if filter_nodes is not None:
+            parameters['filter_nodes'] = filter_nodes
+
+        if filter_routing_table is not None:
+            parameters['filter_routing_table'] = filter_routing_table
+
+        if filter_metadata is not None:
+            parameters['filter_metadata'] = filter_metadata
+
+        if filter_blocks is not None:
+            parameters['filter_blocks'] = filter_blocks
+
+        if filter_blocks is not None:
+            if isinstance(filter_indices, basestring):
+                parameters['filter_indices'] = filter_indices
+            else:
+                parameters['filter_indices'] = ",".join(filter_indices)
+
+        return self._send_request('GET', path, params=parameters)
 
     def cluster_nodes(self, nodes=None):
         """
-        Retrieve the node infos
+        The cluster :ref:`nodes info <es-guide-reference-api-admin-cluster-state>` API allows to retrieve one or more (or all) of 
+        the cluster nodes information.
         """
         parts = ["_cluster", "nodes"]
         if nodes:
             parts.append(",".join(nodes))
+        path = self._make_path(parts)
+        return self._send_request('GET', path)
+
+    def cluster_stats(self, nodes=None):
+        """
+        The cluster :ref:`nodes info <es-guide-reference-api-admin-cluster-nodes-stats>` API allows to retrieve one or more (or all) of 
+        the cluster nodes information.
+        """
+        parts = ["_cluster", "nodes", "stats"]
+        if nodes:
+            parts = ["_cluster", "nodes", ",".join(nodes), "stats"]
+
         path = self._make_path(parts)
         return self._send_request('GET', path)
 
@@ -640,6 +705,7 @@ class ES(object):
 
         if parent:
             querystring_args['parent'] = parent
+
         if version:
             querystring_args['version'] = version
 
@@ -690,12 +756,46 @@ class ES(object):
         data = self.get(index, doc_type, id)
         return data["_source"]['_name'], base64.standard_b64decode(data["_source"]['content'])
 
-    def delete(self, index, doc_type, id):
+    def delete(self, index, doc_type, id, bulk=False):
         """
         Delete a typed JSON document from a specific index based on its id.
+        If bulk is True, the delete operation is put in bulk mode.
         """
+        if bulk:
+            cmd = { "delete" : { "_index" : index, "_type" : doc_type,
+                                "_id": id}}
+            self.bulk_data.write(json.dumps(cmd, cls=self.encoder))
+            self.bulk_data.write("\n")
+            self.bulk_items += 1
+            self.flush_bulk()
+            return
+
         path = self._make_path([index, doc_type, id])
         return self._send_request('DELETE', path)
+
+    def deleteByQuery(self, indexes, doc_types, query, **request_params):
+        """
+        Delete documents from one or more indexes and one or more types based on a query.
+        """
+        querystring_args = request_params
+        indexes = self._validate_indexes(indexes)
+        if doc_types is None:
+            doc_types = []
+        if isinstance(doc_types, basestring):
+            doc_types = [doc_types]
+
+        if hasattr(query, 'to_query_json'):
+            # Then is a Query object.
+            body = query.to_query_json()
+        elif isinstance(query, dict):
+            # A direct set of search parameters.
+            body = json.dumps(query, cls=self.encoder)
+        else:
+            raise pyes.exceptions.InvalidQuery("deleteByQuery() must be supplied with a Query object, or a dict")
+
+        path = self._make_path([','.join(indexes), ','.join(doc_types), '_query'])
+        response = self._send_request('DELETE', path, body, querystring_args)
+        return response
 
     def delete_mapping(self, index, doc_type):
         """
@@ -739,7 +839,7 @@ class ES(object):
             raise pyes.exceptions.InvalidQuery("search() must be supplied with a Search or Query object, or a dict")
 
         return self._query_call("_search", body, indexes, doc_types, **query_params)
-    
+
     def scan(self, query, indexes=None, doc_types=None, scroll_timeout="10m", **query_params):
         """Return a generator which will scan against one or more indices and iterate over the search hits. (currently support only by ES Master)
 
@@ -752,7 +852,7 @@ class ES(object):
         while True:
             scroll_id = results["_scroll_id"]
             results = self._send_request('GET', "_search/scroll", scroll_id, {"scroll":scroll_timeout})
-            total = results["hits"]["total"]
+            total = len(results["hits"]["hits"])
             if not total:
                 break
             yield results
@@ -792,6 +892,15 @@ class ES(object):
             query = query.to_query_json()
         return self._query_call("_count", query, indexes, doc_types, **query_params)
 
+    def morelikethis(self, index, doc_type, id, fields, **query_params):
+        """
+        Execute a "more like this" search query against one or more fields and get back search hits.
+        """
+        path = self._make_path([index, doc_type, id, '_mlt'])
+        query_params['fields'] = ','.join(fields)
+        return self._send_request('GET', path, params=query_params)
+
+    #--- river management
     def create_river(self, river, river_name=None):
         """
         Create a river
@@ -808,6 +917,15 @@ class ES(object):
         if hasattr(river, "q"):
             river_name = river.name
         return self._send_request('DELETE', '/_river/%s/' % river_name)
+
+    #--- settings management
+    def update_settings(self, index, newvalues):
+        """
+        Update Settings of an index.
+        
+        """
+        path = self._make_path([index, "_settings"])
+        return self._send_request('PUT', path, newvalues)
 
 #    def terms(self, fields, indexes=None, **query_params):
 #        """
@@ -828,6 +946,66 @@ class ES(object):
         path = self._make_path([index, doc_type, id, '_mlt'])
         query_params['fields'] = ','.join(fields)
         return self._send_request('GET', path, params=query_params)
+
+    def create_percolator(self, index, name, query, **kwargs):
+        """
+        Create a percolator document
+
+        Any kwargs will be added to the document as extra properties.
+
+        """
+        path = self._make_path(['_percolator', index, name])
+        body = None
+
+        if hasattr(query, 'serialize'):
+            query = {'query': query.serialize()}
+
+        if isinstance(query, dict):
+            # A direct set of search parameters.
+            query.update(kwargs)
+            body = json.dumps(query, cls=self.encoder)
+        else:
+            raise pyes.exceptions.InvalidQuery("create_percolator() must be supplied with a Query object or dict")
+
+        return self._send_request('PUT', path, body=body)
+
+    def delete_percolator(self, index, name):
+        """
+        Delete a percolator document
+        """
+        return self.delete('_percolator', index, name)
+
+    def percolate(self, index, doc_types, query):
+        """
+        Match a query with a document
+        """
+
+        if doc_types is None:
+            raise RuntimeError('percolate() must be supplied with at least one doc_type')
+        elif not isinstance(doc_types, list):
+            doc_types = [doc_types]
+
+        path = self._make_path([index, ','.join(doc_types), '_percolate'])
+        body = None
+
+        if hasattr(query, 'to_query_json'):
+            # Then is a Query object.
+            body = query.to_query_json()
+        elif isinstance(query, dict):
+            # A direct set of search parameters.
+            body = json.dumps(query, cls=self.encoder)
+        else:
+            raise pyes.exceptions.InvalidQuery("percolate() must be supplied with a Query object, or a dict")
+
+        return self._send_request('GET', path, body=body)
+
+    def update_settings(self, index, newvalues):
+        """
+        Update Settings of an index.
+        
+        """
+        path = self._make_path([index, "_settings"])
+        return self._send_request('PUT', path, newvalues)
 
 def decode_json(data):
     """ Decode some json to dict"""

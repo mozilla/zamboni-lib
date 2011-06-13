@@ -96,6 +96,48 @@ class HistogramFacet(Facet):
 
         return {self.name:{self._internal_name:data}}
 
+class DateHistogramFacet(Facet):
+    _internal_name = "date_histogram"
+
+    def __init__(self, name,
+                 field=None, interval=None, zone=None,
+                 key_field=None, value_field=None,
+                 value_script=None, params=None,
+                 **kwargs):
+        super(DateHistogramFacet, self).__init__(**kwargs)
+        self.name = name
+        self.field = field
+        self.interval = interval
+        self.zone = zone
+        self.key_field = key_field
+        self.value_field = value_field
+        self.value_script = value_script
+        self.params = params
+
+    def serialize(self):
+        data = {}
+
+        if self.interval:
+            data['interval'] = self.interval
+            if self.zone:
+                data['zone'] = self.zone
+        else:
+            raise RuntimeError("interval required")
+        if self.field:
+            data['field'] = self.field
+        elif self.key_field:
+            data['key_field'] = self.key_field
+            if self.value_field:
+                data['value_field'] = self.value_field
+            elif self.value_script:
+                data['value_script'] = self.value_script
+                if self.params:
+                    data['params'] = self.params
+            else:
+                raise RuntimeError("Invalid key_field: value_field or value_script required")
+
+        return {self.name:{self._internal_name:data}}
+
 class RangeFacet(Facet):
     _internal_name = "range"
 
@@ -167,13 +209,14 @@ class StatisticalFacet(Facet):
 class TermFacet(Facet):
     _internal_name = "terms"
 
-    def __init__(self, field, name=None, size=10,
+    def __init__(self, field=None, fields=None, name=None, size=10,
                  order=None, exclude=None,
                  regex=None, regex_flags="DOTALL",
                  script=None, **kwargs):
         super(TermFacet, self).__init__(**kwargs)
         self.name = name
         self.field = field
+        self.fields = fields
         if name is None:
             self.name = field
         self.size = size
@@ -184,7 +227,14 @@ class TermFacet(Facet):
         self.script = script
 
     def serialize(self):
-        data = {'field':self.field}
+        if self.fields:
+            data = {'fields':self.fields}
+        else:
+            if self.field:
+                data = {'field':self.field}
+            else:
+                raise RuntimeError("Field or Fields is required:%s" % self.order)
+
         if self.size:
             data['size'] = self.size
 

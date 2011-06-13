@@ -16,7 +16,8 @@ from es import ESJsonEncoder
 from utils import clean_string, ESRange
 from facets import FacetFactory
 from highlight import HighLighter
-from pyes.exceptions import InvalidQuery, InvalidParameterQuery, QueryError
+from scriptfields import ScriptFields
+from pyes.exceptions import InvalidQuery, InvalidParameterQuery, QueryError, ScriptFieldsError
 log = logging.getLogger('pyes')
 
 class FieldParameter:
@@ -90,6 +91,8 @@ class Search(object):
                  explain=False,
                  facet=None,
                  version=None,
+                 track_scores=None,
+                 script_fields=None,
                  index_boost={}):
         """
         fields: if is [], the _source is not returned
@@ -103,6 +106,8 @@ class Search(object):
         self.explain = explain
         self.facet = facet or FacetFactory()
         self.version = version
+        self.track_scores = track_scores
+        self.script_fields = script_fields
         self.index_boost = index_boost
 
     def get_facet_factory(self):
@@ -134,6 +139,13 @@ class Search(object):
             res['explain'] = self.explain
         if self.version:
             res['version'] = self.version
+        if self.track_scores:
+            res['track_scores'] = self.track_scores
+        if self.script_fields:
+            if isinstance(self.script_fields, ScriptFields):
+                res['script_fields'] = self.script_fields.serialize()
+            else:
+                raise ScriptFieldsError("Parameter script_fields should of type ScriptFields")
         if self.index_boost:
             res['indices_boost'] = self.index_boost
         if self.facet.facets:
@@ -181,6 +193,11 @@ class Query(object):
     """Base class for all queries.
 
     """
+
+    def __init__(self, *args, **kwargs):
+        if len(args) > 0 or len(kwargs) > 0:
+            raise RuntimeWarning("No all parameters are processed by derivated query object")
+
     def serialize(self):
         """Serialize the query to a structure using the query DSL.
 
@@ -764,7 +781,7 @@ class PrefixQuery(Query):
         self._values = {}
 
         if field is not None and prefix is not None:
-            self.add(field, prefix)
+            self.add(field, prefix, boost)
 
     def add(self, field, prefix, boost=None):
         match = {'prefix':prefix}
@@ -793,7 +810,7 @@ class TermQuery(Query):
         self._values = {}
 
         if field is not None and value is not None:
-            self.add(field, value)
+            self.add(field, value, boost)
 
     def add(self, field, value, boost=None):
         if not value.strip():
@@ -830,6 +847,48 @@ class TermsQuery(TermQuery):
             else:
                 self._values['minimum_match'] = int(minimum_match)
 
+class TextQuery(Query):
+    """
+    A new family of text queries that accept text, analyzes it, and constructs a query out of it.
+    """
+    _internal_name = "text"
+    _valid_types = ['boolean', "phrase", "phrase_prefix"]
+    _valid_operators = ['or', "and"]
+
+    def __init__(self, text, type="boolean", slop=0, fuzziness=None,
+                 prefix_length=0, max_expansions=2147483647,
+                 operator="or", **kwargs):
+        super(TextQuery, self).__init__(**kwargs)
+        self.text = text
+        self.type = type
+        self.slop = slop
+        self.fuzziness = fuzziness
+        self.prefix_lenght = prefix_length
+        self.max_expansions = max_expansions
+        self.operator = operator
+
+    def serialize(self):
+
+        if self.type not in self._valid_types:
+            raise QueryError("Invalid value '%s' for type: allowed values are %s" % (self.type, self._valid_types))
+        if self.operator not in self._valid_operators:
+            raise QueryError("Invalid value '%s' for operator: allowed values are %s" % (self.operator, self._valid_operators))
+
+        options = {'type':self.type,
+                   "query":self.text}
+        if self.slop != 0:
+            options["slop"] = self.slop
+        if self.fuzziness is not None:
+            options["fuzziness"] = self.fuzziness
+        if self.slop != 0:
+            options["prefix_length"] = self.prefix_length
+        if self.max_expansions != 2147483647:
+            options["max_expansions"] = self.max_expansions
+        if self.operator:
+            options["operator"] = self.operator
+
+        return {self._internal_name:options}
+
 class RegexTermQuery(TermQuery):
     _internal_name = "regex_term"
 
@@ -850,6 +909,7 @@ class StringQuery(Query):
                 fuzzy_min_sim=0.5,
                 phrase_slop=0,
                 boost=1.0,
+                analyze_wildcard=False,
                 use_dis_max=True,
                 tie_breaker=0,
                 clean_text=False,
@@ -868,6 +928,7 @@ class StringQuery(Query):
         self.fuzzy_min_sim = fuzzy_min_sim
         self.phrase_slop = phrase_slop
         self.boost = boost
+        self.analyze_wildcard = analyze_wildcard
         self.use_dis_max = use_dis_max
         self.tie_breaker = tie_breaker
 
@@ -911,6 +972,8 @@ class StringQuery(Query):
                     filters["tie_breaker"] = self.tie_breaker
         if self.boost != 1.0:
             filters["boost"] = self.boost
+        if self.analyze_wildcard:
+            filters["analyze_wildcard"] = self.analyze_wildcard
         if self.clean_text:
             query = clean_string(self.query)
             if not query:
@@ -996,7 +1059,7 @@ class SpanNearQuery(Query):
         if self.collect_payloads is not None:
             data["collect_payloads"] = self.collect_payloads
 
-        data['clauses'] = [clause.serizialize() for clause in self.clauses]
+        data['clauses'] = [clause.serialize() for clause in self.clauses]
 
         return {self._internal_name:data}
 
@@ -1025,8 +1088,8 @@ class SpanNotQuery(Query):
 
         self._validate()
         data = {}
-        data['include'] = self.include.serizialize()
-        data['exclude'] = self.exclude.serizialize()
+        data['include'] = self.include.serialize()
+        data['exclude'] = self.exclude.serialize()
 
         return {self._internal_name:data}
 
@@ -1056,7 +1119,7 @@ class SpanOrQuery(Query):
     def serialize(self):
         if not self.clauses or len(self.clauses) == 0:
             raise RuntimeError("A least a Span*Query must be added to clauses")
-        clauses = [clause.serizialize() for clause in self.clauses]
+        clauses = [clause.serialize() for clause in self.clauses]
         return {self._internal_name:{"clauses":clauses}}
 
 class SpanTermQuery(TermQuery):
@@ -1108,3 +1171,57 @@ class CustomScoreQuery(Query):
 
     def __repr__(self):
         return str(self.q)
+
+class IdsQuery(Query):
+    _internal_name = "ids"
+    def __init__(self, type, values, **kwargs):
+        super(IdsQuery, self).__init__(**kwargs)
+        self.type = type
+        self.values = values
+
+    def serialize(self):
+        data = {}
+        if self.type:
+            data['type'] = self.type
+        if isinstance(self.values, basestring):
+            data['values'] = [self.values]
+        else:
+            data['values'] = self.values
+
+        return {self._internal_name:data}
+
+
+class PercolatorQuery(Query):
+    """A percolator query is used to determine which registered
+    PercolatorDoc's match the document supplied.
+
+    """
+
+    def __init__(self, doc, query=None, **kwargs):
+        """Constructor
+
+        doc - the doc to match against, dict
+        query - an additional query that can be used to filter the percolated
+        queries used to match against.
+        """
+        super(PercolatorQuery, self).__init__(**kwargs)
+        self.doc = doc
+        self.query = query
+
+    def serialize(self):
+        """Serialize the query to a structure using the query DSL.
+
+        """
+        data = {}
+        data['doc'] = self.doc
+        if hasattr(self.query, 'serialize'):
+            data['query'] = self.query.serialize()
+        return data
+
+    def search(self, **kwargs):
+        """Disable this as it is not allowed in percolator queries."""
+        raise NotImplementedError()
+
+    def to_search_json(self):
+        """Disable this as it is not allowed in percolator queries."""
+        raise NotImplementedError()

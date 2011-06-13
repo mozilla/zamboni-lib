@@ -7,11 +7,13 @@ __all__ = ['NoServerAvailable',
            "QueryError",
            "NotFoundException",
            "AlreadyExistsException",
+           "IndexAlreadyExistsException",
            "IndexMissingException",
            "SearchPhaseExecutionException",
            "InvalidQuery",
            "InvalidParameterQuery",
            "QueryParameterError",
+           "ScriptFieldsError",
            "ReplicationShardOperationFailedException",
            "ClusterBlockException",
            "MapperParsingException",
@@ -34,6 +36,8 @@ class QueryError(Exception):
 class QueryParameterError(Exception):
     pass
 
+class ScriptFieldsError(Exception):
+    pass
 
 class ElasticSearchException(Exception):
     """Base class of exceptions raised as a result of parsing an error return
@@ -58,6 +62,9 @@ class NotFoundException(ElasticSearchException):
     pass
 
 class AlreadyExistsException(ElasticSearchException):
+    pass
+
+class IndexAlreadyExistsException(AlreadyExistsException):
     pass
 
 class SearchPhaseExecutionException(ElasticSearchException):
