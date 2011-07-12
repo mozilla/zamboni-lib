@@ -15,7 +15,7 @@ src/django-fixture-magic
 src/django-mobility
 src/django-multidb-router
 src/django-nose
-src/django-piston-oauth2
+src/django-piston
 src/django-quieter-formset
 src/django-queryset-transform
 src/django-qunit

@@ -46,6 +46,9 @@
 [submodule "src/django-nose"]
 	path = src/django-nose
 	url = git://github.com/jbalogh/django-nose.git
+[submodule "src/django-piston"]
+	path = src/django-piston
+	url = git://github.com/mozilla/django-piston.git
 [submodule "src/django-queryset-transform"]
 	path = src/django-queryset-transform
 	url = git://github.com/jbalogh/django-queryset-transform.git
@@ -118,6 +121,3 @@
 [submodule "src/addon-sdk-sdocs"]
 	path = src/addon-sdk-sdocs
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "django-piston-oauth2"]
-	path = django-piston-oauth2
-	url = git@github.com:andymckay/django-piston-oauth2.git
