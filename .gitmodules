@@ -120,4 +120,4 @@
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
 [submodule "src/django-piston-oauth2"]
 	path = src/django-piston-oauth2
-	url = git://github.com:andymckay/django-piston-oauth2.git
+	url = git://github.com/andymckay/django-piston-oauth2.git
