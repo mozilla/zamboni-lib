@@ -124,3 +124,6 @@
 [submodule "src/django-ratelimit"]
 	path = src/django-ratelimit
 	url = git://github.com/jsocol/django-ratelimit.git
+[submodule "src/django-mozilla-product-details"]
+	path = src/django-mozilla-product-details
+	url = git://github.com/fwenzel/django-mozilla-product-details.git
