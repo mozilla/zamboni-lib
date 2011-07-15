@@ -121,3 +121,6 @@
 [submodule "src/django-piston-oauth2"]
 	path = src/django-piston-oauth2
 	url = git://github.com/andymckay/django-piston-oauth2.git
+[submodule "src/django-ratelimit"]
+	path = src/django-ratelimit
+	url = git://github.com/jsocol/django-ratelimit.git

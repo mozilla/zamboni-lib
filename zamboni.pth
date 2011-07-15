@@ -19,6 +19,7 @@ src/django-piston-oauth2
 src/django-quieter-formset
 src/django-queryset-transform
 src/django-qunit
+src/django-ratelimit
 src/django-recaptcha
 src/django-tables
 src/django-waffle
