@@ -75,7 +75,7 @@
 	url = git://github.com/simplegeo/python-oauth2.git
 [submodule "src/redis"]
     path = src/redis
-    url = git://github.com/jbalogh/redis-py
+    url = https://github.com/andymccurdy/redis-py
 [submodule "src/schematic"]
 	path = src/schematic
 	url = git://github.com/jbalogh/schematic.git
