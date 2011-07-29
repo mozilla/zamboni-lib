@@ -127,3 +127,6 @@
 [submodule "src/django-mozilla-product-details"]
 	path = src/django-mozilla-product-details
 	url = git://github.com/andymckay/django-mozilla-product-details.git
+[submodule "src/django-browserid"]
+	path = src/django-browserid
+	url = git://github.com/mozilla/django-browserid
