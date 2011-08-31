@@ -5,6 +5,7 @@ src/cache-panel
 src/check
 src/commonware
 src/django
+src/django-arecibo
 src/django-cache-machine
 src/django-cronjobs
 src/django-csp

@@ -130,3 +130,6 @@
 [submodule "src/django-browserid"]
 	path = src/django-browserid
 	url = git://github.com/mozilla/django-browserid
+[submodule "src/django-arecibo"]
+	path = src/django-arecibo
+	url = git://github.com/andymckay/django-arecibo.git
