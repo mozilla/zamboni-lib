@@ -11,6 +11,7 @@ src/django-cronjobs
 src/django-csp
 src/django-debug-toolbar
 src/django-devserver
+src/django-browserid
 src/django-extensions
 src/django-fixture-magic
 src/django-mobility
@@ -35,6 +36,7 @@ src/jstestnetlib
 src/nuggets
 src/python-oauth2
 src/pymongo
+src/pyjwt
 src/redis
 src/schematic
 src/statsd

@@ -133,3 +133,6 @@
 [submodule "src/django-arecibo"]
 	path = src/django-arecibo
 	url = git://github.com/andymckay/django-arecibo.git
+[submodule "src/pyjwt"]
+	path = src/pyjwt
+	url = git://github.com/michaelrhanson/pyjwt.git
