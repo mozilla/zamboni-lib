@@ -136,3 +136,6 @@
 [submodule "src/pyjwt"]
 	path = src/pyjwt
 	url = git://github.com/michaelrhanson/pyjwt.git
+[submodule "src/django-radagast"]
+	path = src/django-radagast
+	url = git://github.com/andymckay/django-radagast.git
