@@ -119,7 +119,7 @@ class Plugin(object):
 
 class IPluginInterface(object):
     """
-    IPluginInteface describes the plugin API. Do not subclass or use this
+    IPluginInterface describes the plugin API. Do not subclass or use this
     class directly.
     """
     def __new__(cls, *arg, **kw):
@@ -340,7 +340,7 @@ class IPluginInterface(object):
         """Called in result.addFailure, before plugin.addFailure. If you
         want to replace or modify the error tuple, return a new error
         tuple. Because this method is chainable, you must return the
-        test as well, so you you'll return something like::
+        test as well, so you'll return something like::
 
           return (test, err)
 
