@@ -30,7 +30,7 @@
 	url = git://github.com/mozilla/django-csp.git
 [submodule "src/django-debug-toolbar"]
 	path = src/django-debug-toolbar
-	url = git://github.com/robhudson/django-debug-toolbar.git
+	url = https://github.com/django-debug-toolbar/django-debug-toolbar.git
 [submodule "src/django-devserver"]
 	path = src/django-devserver
 	url = git://github.com/dcramer/django-devserver.git
