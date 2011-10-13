@@ -139,3 +139,6 @@
 [submodule "src/django-radagast"]
 	path = src/django-radagast
 	url = git://github.com/andymckay/django-radagast.git
+[submodule "src/django-pylibmc"]
+	path = src/django-pylibmc
+	url = git://github.com/jbalogh/django-pylibmc.git
