@@ -6,12 +6,12 @@ src/check
 src/commonware
 src/django
 src/django-arecibo
+src/django-browserid
 src/django-cache-machine
 src/django-cronjobs
 src/django-csp
 src/django-debug-toolbar
 src/django-devserver
-src/django-browserid
 src/django-extensions
 src/django-fixture-magic
 src/django-mobility
@@ -19,8 +19,9 @@ src/django-mozilla-product-details
 src/django-multidb-router
 src/django-nose
 src/django-piston-oauth2
-src/django-quieter-formset
+src/django-pylibmc
 src/django-queryset-transform
+src/django-quieter-formset
 src/django-qunit
 src/django-ratelimit
 src/django-radagast
@@ -28,6 +29,7 @@ src/django-recaptcha
 src/django-tables
 src/django-waffle
 src/easy-thumbnails
+src/elasticutils
 src/fastchardet
 src/happyforms
 src/hera
@@ -43,4 +45,3 @@ src/schematic
 src/statsd
 src/test-utils
 src/tower
-src/elasticutils
