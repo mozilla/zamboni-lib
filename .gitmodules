@@ -115,9 +115,6 @@
 [submodule "src/statsd"]
 	path = src/statsd
 	url = git://github.com/jsocol/pystatsd.git
-[submodule "src/addon-sdk-sdocs"]
-	path = src/addon-sdk-sdocs
-	url = git://github.com/mozilla/addon-sdk-sdocs.git
 [submodule "src/django-piston-oauth2"]
 	path = src/django-piston-oauth2
 	url = git://github.com/andymckay/django-piston-oauth2.git
@@ -142,3 +139,12 @@
 [submodule "src/django-pylibmc"]
 	path = src/django-pylibmc
 	url = git://github.com/jbalogh/django-pylibmc.git
+[submodule "src/addon-sdk-docs-1.0"]
+	path = src/addon-sdk-docs-1.0
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/addon-sdk-docs-1.1"]
+	path = src/addon-sdk-docs-1.1
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/addon-sdk-docs-1.2"]
+	path = src/addon-sdk-docs-1.2
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
