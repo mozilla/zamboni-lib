@@ -148,3 +148,6 @@
 [submodule "src/addon-sdk-docs-1.2"]
 	path = src/addon-sdk-docs-1.2
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/addon-sdk-docs-1.2.1"]
+	path = src/addon-sdk-docs-1.2.1
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
