@@ -155,6 +155,8 @@ def _syslog(msg, config):
         if _LOG_OPENED != (ident, logopt, facility):
             syslog.openlog(ident, logopt, facility)
             _LOG_OPENED = ident, logopt, facility
+        if isinstance(msg, unicode):
+            msg = msg.encode('utf-8')
         syslog.syslog(priority, msg)
 
 
