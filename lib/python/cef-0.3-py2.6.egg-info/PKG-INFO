@@ -1,6 +1,6 @@
 Metadata-Version: 1.0
 Name: cef
-Version: 0.2
+Version: 0.3
 Summary: Module that emits CEF logs
 Home-page: http://hg.mozilla.org/services/cef
 Author: Mozilla Services team

@@ -93,13 +93,11 @@ OVERRIDE_FAILURE = 'InvalidAdmin'
 ACCOUNT_LOCKED = 'AccountLockout'
 PASSWD_RESET_CLR = 'PasswordResetCleared'
 
-_LOGGING_FORMAT = ('CEF:%(version)s|%(vendor)s|%(product)s|'
+_CEF_FORMAT = ('%(date)s %(host)s CEF:%(version)s|%(vendor)s|%(product)s|'
                '%(device_version)s|%(signature)s|%(name)s|%(severity)s|'
                'cs1Label=requestClientApplication cs1=%(user_agent)s '
                'requestMethod=%(method)s request=%(url)s '
                'src=%(source)s dest=%(dest)s suser=%(suser)s')
-
-_CEF_FORMAT = '%(date)s %(host)s ' + _LOGGING_FORMAT
 
 _EXTENSIONS = ['cs1Label', 'cs1', 'requestMethod', 'request', 'src', 'dest',
                'suser']
@@ -157,6 +155,8 @@ def _syslog(msg, config):
         if _LOG_OPENED != (ident, logopt, facility):
             syslog.openlog(ident, logopt, facility)
             _LOG_OPENED = ident, logopt, facility
+        if isinstance(msg, unicode):
+            msg = msg.encode('utf-8')
         syslog.syslog(priority, msg)
 
 
@@ -218,8 +218,8 @@ def _get_fields(name, severity, environ, config, username=None,
 
     fields = {'severity': severity,
               'source': source,
-              'method': _convert_ext(environ['REQUEST_METHOD']),
-              'url': _convert_ext(environ['PATH_INFO']),
+              'method': _convert_ext(environ.get('REQUEST_METHOD', '')),
+              'url': _convert_ext(environ.get('PATH_INFO', '')),
               'dest': _convert_ext(environ.get('HTTP_HOST', u'none')),
               'user_agent': _convert_ext(environ.get('HTTP_USER_AGENT',
                                                      u'none')),
@@ -246,15 +246,13 @@ def _get_fields(name, severity, environ, config, username=None,
     return fields
 
 
-def _format_msg(fields, kw, maxlen=_MAXLEN, format=_CEF_FORMAT,
-                extensions=_EXTENSIONS):
+def _format_msg(fields, kw, maxlen=_MAXLEN):
     # adding custom extensions
     # sorting by size
-    msg = format % fields
-
+    msg = _CEF_FORMAT % fields
     extensions = [(len(str(value)), len(key), key, value)
                     for key, value in kw.items()
-                  if key not in extensions]
+                  if key not in _EXTENSIONS]
     extensions.sort()
 
     msg_len = len(msg)
@@ -314,14 +312,6 @@ LEVEL_MAP = {
 
 
 class _Formatter(logging.Formatter):
-    _LOGGING_FORMAT = ('CEF:%(version)s|%(vendor)s|%(product)s|'
-               '%(device_version)s|%(signature)s|%(name)s|%(severity)s|'
-               'src=%(source)s dest=%(dest)s '
-               'requestClientApplication=%(user_agent)s '
-               'requestMethod=%(method)s request=%(url)s '
-               'suser=%(suser)s')
-    _EXTENSIONS = ['requestMethod', 'request', 'src', 'dest', 'suser']
-
     def format(self, record):
         kw = record.args
         fields = _get_fields(record.msg, kw['severity'], kw['environ'],
@@ -332,24 +322,14 @@ class _Formatter(logging.Formatter):
                              username=kw.get('username'),
                              signature=kw.get('signature'))
 
-        record.msg = _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'),
-                                 format=self._LOGGING_FORMAT,
-                                 extensions=self._EXTENSIONS)
-        # Stop logging trying to interpolate again.
-        record.args = None
-        return logging.Formatter.format(self, record)
+        datefmt = getattr(self, 'datefmt', None)
+        if not datefmt:
+            datefmt = '%H:%M:%s'
+        fields['date'] = strftime(datefmt)
+        return _format_msg(fields, kw['data'], maxlen=kw.get('maxlen'))
 
 
 class SysLogFormatter(_Formatter):
-
-    def format_data(self, data):
-        result = {}
-        for num, row in enumerate(data, 1):
-            result['cs%sLabel' % num] = row[0]
-            result['cs%s' % num] = row[1]
-        return result
-
     def format(self, record):
         record.args['severity'] = LEVEL_MAP[record.levelno]
-        record.args['data'] = self.format_data(record.args['data'])
         return _Formatter.format(self, record)
