@@ -11,6 +11,7 @@ src/django-cache-machine
 src/django-cronjobs
 src/django-csp
 src/django-debug-toolbar
+src/django-delayed-mailer
 src/django-devserver
 src/django-extensions
 src/django-fixture-magic
