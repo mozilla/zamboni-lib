@@ -153,4 +153,7 @@
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
 [submodule "src/addon-sdk-docs-1.3"]
 	path = src/addon-sdk-docs-1.3
-	url = git://github.com/mozilla/addon-sdk-sdocs.git
+        url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/django-delayed-mailer"]
+	path = src/django-delayed-mailer
+	url = git://github.com/andymckay/django-delayed-mailer.git
