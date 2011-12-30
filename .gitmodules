@@ -157,3 +157,6 @@
 [submodule "src/django-delayed-mailer"]
 	path = src/django-delayed-mailer
 	url = git://github.com/andymckay/django-delayed-mailer.git
+[submodule "src/django-statsd"]
+	path = src/django-statsd
+	url = git://github.com/andymckay/django-statsd.git
