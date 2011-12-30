@@ -27,6 +27,7 @@ src/django-qunit
 src/django-ratelimit
 src/django-radagast
 src/django-recaptcha
+src/django-statsd
 src/django-tables
 src/django-waffle
 src/easy-thumbnails
