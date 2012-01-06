@@ -5,11 +5,14 @@ http://nedbatchelder.com/code/coverage
 
 """
 
-__version__ = "3.2b4"    # see detailed history in CHANGES.txt
+__version__ = "3.5.1"     # see detailed history in CHANGES.txt
 
 __url__ = "http://nedbatchelder.com/code/coverage"
+if max(__version__).isalpha():
+    # For pre-releases, use a version-specific URL.
+    __url__ += "/" + __version__
 
-from coverage.control import coverage
+from coverage.control import coverage, process_startup
 from coverage.data import CoverageData
 from coverage.cmdline import main, CoverageScript
 from coverage.misc import CoverageException
@@ -17,8 +20,10 @@ from coverage.misc import CoverageException
 
 # Module-level functions.  The original API to this module was based on
 # functions defined directly in the module, with a singleton of the coverage()
-# class.  That design hampered programmability.  Here we define the top-level
-# functions to create the singleton when they are first called.
+# class.  That design hampered programmability, so the current api uses
+# explicitly-created coverage objects.  But for backward compatibility, here we
+# define the top-level functions to create the singleton when they are first
+# called.
 
 # Singleton object for use with module-level functions.  The singleton is
 # created as needed when one of the module-level functions is called.
@@ -26,10 +31,10 @@ _the_coverage = None
 
 def _singleton_method(name):
     """Return a function to the `name` method on a singleton `coverage` object.
-    
+
     The singleton object is created the first time one of these functions is
     called.
-    
+
     """
     def wrapper(*args, **kwargs):
         """Singleton wrapper around a coverage method."""
@@ -55,7 +60,7 @@ annotate =  _singleton_method('annotate')
 # COPYRIGHT AND LICENSE
 #
 # Copyright 2001 Gareth Rees.  All rights reserved.
-# Copyright 2004-2009 Ned Batchelder.  All rights reserved.
+# Copyright 2004-2010 Ned Batchelder.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
