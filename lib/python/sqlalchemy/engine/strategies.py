@@ -1,3 +1,9 @@
+# engine/strategies.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Strategies for creating new instances of Engine types.
 
 These are semi-private implementation classes which provide the
@@ -11,7 +17,7 @@ New strategies can be added via new ``EngineStrategy`` classes.
 from operator import attrgetter
 
 from sqlalchemy.engine import base, threadlocal, url
-from sqlalchemy import util, exc
+from sqlalchemy import util, exc, event
 from sqlalchemy import pool as poollib
 
 strategies = {}
@@ -22,7 +28,7 @@ class EngineStrategy(object):
 
     Provides a ``create`` method that receives input arguments and
     produces an instance of base.Engine or a subclass.
-    
+
     """
 
     def __init__(self):
@@ -37,8 +43,6 @@ class EngineStrategy(object):
 class DefaultEngineStrategy(EngineStrategy):
     """Base class for built-in stratgies."""
 
-    pool_threadlocal = False
-    
     def create(self, name_or_url, **kwargs):
         # create url.URL object
         u = url.make_url(name_or_url)
@@ -76,16 +80,25 @@ class DefaultEngineStrategy(EngineStrategy):
                     return dialect.connect(*cargs, **cparams)
                 except Exception, e:
                     # Py3K
-                    #raise exc.DBAPIError.instance(None, None, e) from e
+                    #raise exc.DBAPIError.instance(None, None, 
+                    #                   e, dialect.dbapi.Error,
+                    #                   connection_invalidated=
+                    #                       dialect.is_disconnect(e, None, None)
+                    #                       ) from e
                     # Py2K
                     import sys
-                    raise exc.DBAPIError.instance(None, None, e), None, sys.exc_info()[2]
+                    raise exc.DBAPIError.instance(
+                                None, None, e, dialect.dbapi.Error,
+                                connection_invalidated=
+                                        dialect.is_disconnect(e, None, None)), \
+                                None, sys.exc_info()[2]
                     # end Py2K
-                    
+
             creator = kwargs.pop('creator', connect)
 
-            poolclass = (kwargs.pop('poolclass', None) or
-                         getattr(dialect_cls, 'poolclass', poollib.QueuePool))
+            poolclass = kwargs.pop('poolclass', None)
+            if poolclass is None:
+                poolclass = dialect_cls.get_pool_class(u)
             pool_args = {}
 
             # consume pool arguments from kwargs, translating a few of
@@ -94,12 +107,12 @@ class DefaultEngineStrategy(EngineStrategy):
                          'echo': 'echo_pool',
                          'timeout': 'pool_timeout',
                          'recycle': 'pool_recycle',
+                         'events':'pool_events',
                          'use_threadlocal':'pool_threadlocal'}
             for k in util.get_cls_kwargs(poolclass):
                 tk = translate.get(k, k)
                 if tk in kwargs:
                     pool_args[k] = kwargs.pop(tk)
-            pool_args.setdefault('use_threadlocal', self.pool_threadlocal)
             pool = poolclass(creator, **pool_args)
         else:
             if isinstance(pool, poollib._DBProxy):
@@ -115,7 +128,7 @@ class DefaultEngineStrategy(EngineStrategy):
                 engine_args[k] = kwargs.pop(k)
 
         _initialize = kwargs.pop('_initialize', True)
-        
+
         # all kwargs should be consumed
         if kwargs:
             raise TypeError(
@@ -126,24 +139,32 @@ class DefaultEngineStrategy(EngineStrategy):
                                     dialect.__class__.__name__,
                                     pool.__class__.__name__,
                                     engineclass.__name__))
-                                    
+
         engine = engineclass(pool, dialect, u, **engine_args)
 
         if _initialize:
             do_on_connect = dialect.on_connect()
             if do_on_connect:
-                def on_connect(conn, rec):
-                    conn = getattr(conn, '_sqla_unwrap', conn)
+                def on_connect(dbapi_connection, connection_record):
+                    conn = getattr(dbapi_connection, '_sqla_unwrap', dbapi_connection)
                     if conn is None:
                         return
                     do_on_connect(conn)
-                    
-                pool.add_listener({'first_connect': on_connect, 'connect':on_connect})
-                    
-            def first_connect(conn, rec):
-                c = base.Connection(engine, connection=conn)
+
+                event.listen(pool, 'first_connect', on_connect)
+                event.listen(pool, 'connect', on_connect)
+
+            def first_connect(dbapi_connection, connection_record):
+                c = base.Connection(engine, connection=dbapi_connection)
+
+                # TODO: removing this allows the on connect activities
+                # to generate events.  tests currently assume these aren't
+                # sent.  do we want users to get all the initial connect
+                # activities as events ?
+                c._has_events = False
+
                 dialect.initialize(c)
-            pool.add_listener({'first_connect':first_connect})
+            event.listen(pool, 'first_connect', first_connect)
 
         return engine
 
@@ -153,15 +174,14 @@ class PlainEngineStrategy(DefaultEngineStrategy):
 
     name = 'plain'
     engine_cls = base.Engine
-    
+
 PlainEngineStrategy()
 
 
 class ThreadLocalEngineStrategy(DefaultEngineStrategy):
     """Strategy for configuring an Engine with thredlocal behavior."""
-    
+
     name = 'threadlocal'
-    pool_threadlocal = True
     engine_cls = threadlocal.TLEngine
 
 ThreadLocalEngineStrategy()
@@ -172,11 +192,11 @@ class MockEngineStrategy(EngineStrategy):
 
     Produces a single mock Connectable object which dispatches
     statement execution to a passed-in function.
-    
+
     """
 
     name = 'mock'
-    
+
     def create(self, name_or_url, executor, **kwargs):
         # create url.URL object
         u = url.make_url(name_or_url)
@@ -213,13 +233,20 @@ class MockEngineStrategy(EngineStrategy):
         def create(self, entity, **kwargs):
             kwargs['checkfirst'] = False
             from sqlalchemy.engine import ddl
-            
+
             ddl.SchemaGenerator(self.dialect, self, **kwargs).traverse(entity)
 
         def drop(self, entity, **kwargs):
             kwargs['checkfirst'] = False
             from sqlalchemy.engine import ddl
             ddl.SchemaDropper(self.dialect, self, **kwargs).traverse(entity)
+
+        def _run_visitor(self, visitorcallable, element, 
+                                        connection=None, 
+                                        **kwargs):
+            kwargs['checkfirst'] = False
+            visitorcallable(self.dialect, self,
+                                **kwargs).traverse(element)
 
         def execute(self, object, *multiparams, **params):
             raise NotImplementedError()

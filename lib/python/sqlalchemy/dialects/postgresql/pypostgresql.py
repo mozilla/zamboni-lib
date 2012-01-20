@@ -1,14 +1,18 @@
+# postgresql/pypostgresql.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Support for the PostgreSQL database via py-postgresql.
 
 Connecting
 ----------
 
-URLs are of the form ``postgresql+pypostgresql://user@password@host:port/dbname[?key=value&key=value...]``.
+URLs are of the form ``postgresql+pypostgresql://user:password@host:port/dbname[?key=value&key=value...]``.
 
 
 """
-from sqlalchemy.engine import default
-import decimal
 from sqlalchemy import util
 from sqlalchemy import types as sqltypes
 from sqlalchemy.dialects.postgresql.base import PGDialect, PGExecutionContext
@@ -63,7 +67,7 @@ class PGDialect_pypostgresql(PGDialect):
         opts.update(url.query)
         return ([], opts)
 
-    def is_disconnect(self, e):
+    def is_disconnect(self, e, connection, cursor):
         return "connection is closed" in str(e)
 
 dialect = PGDialect_pypostgresql

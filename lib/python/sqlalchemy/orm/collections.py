@@ -1,3 +1,9 @@
+# orm/collections.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Support for collections of mapped entities.
 
 The collections package supplies the machinery used to inform the ORM of
@@ -102,9 +108,8 @@ import operator
 import sys
 import weakref
 
-import sqlalchemy.exceptions as sa_exc
 from sqlalchemy.sql import expression
-from sqlalchemy import schema, util
+from sqlalchemy import schema, util, exc as sa_exc
 
 
 __all__ = ['collection', 'collection_adapter',
@@ -117,7 +122,7 @@ __instrumentation_mutex = util.threading.Lock()
 def column_mapped_collection(mapping_spec):
     """A dictionary-based collection type with column-based keying.
 
-    Returns a MappedCollection factory with a keying function generated
+    Returns a :class:`.MappedCollection` factory with a keying function generated
     from mapping_spec, which may be a Column or a sequence of Columns.
 
     The key value must be immutable for the lifetime of the object.  You
@@ -148,8 +153,9 @@ def column_mapped_collection(mapping_spec):
 def attribute_mapped_collection(attr_name):
     """A dictionary-based collection type with attribute-based keying.
 
-    Returns a MappedCollection factory with a keying based on the
-    'attr_name' attribute of entities in the collection.
+    Returns a :class:`.MappedCollection` factory with a keying based on the
+    'attr_name' attribute of entities in the collection, where ``attr_name``
+    is the string name of the attribute.
 
     The key value must be immutable for the lifetime of the object.  You
     can not, for example, map on foreign key values if those key values will
@@ -163,7 +169,7 @@ def attribute_mapped_collection(attr_name):
 def mapped_collection(keyfunc):
     """A dictionary-based collection type with arbitrary keying.
 
-    Returns a MappedCollection factory with a keying function generated
+    Returns a :class:`.MappedCollection` factory with a keying function generated
     from keyfunc, a callable that takes an entity and returns a key value.
 
     The key value must be immutable for the lifetime of the object.  You
@@ -180,7 +186,7 @@ class collection(object):
     The decorators fall into two groups: annotations and interception recipes.
 
     The annotating decorators (appender, remover, iterator,
-    internally_instrumented, on_link) indicate the method's purpose and take no
+    internally_instrumented, link) indicate the method's purpose and take no
     arguments.  They are not written with parens::
 
         @collection.appender
@@ -194,10 +200,6 @@ class collection(object):
 
         @collection.removes_return()
         def popitem(self): ...
-
-    Decorators can be specified in long-hand for Python 2.3, or with
-    the class-level dict attribute '__instrumentation__'- see the source
-    for details.
 
     """
     # Bundled as a class solely for ease of use: packaging, doc strings,
@@ -253,7 +255,7 @@ class collection(object):
 
         The remover method is called with one positional argument: the value
         to remove. The method will be automatically decorated with
-        'removes_return()' if not already decorated::
+        :meth:`removes_return` if not already decorated::
 
             @collection.remover
             def zap(self, entity): ...
@@ -293,7 +295,7 @@ class collection(object):
         """Tag the method as instrumented.
 
         This tag will prevent any decoration from being applied to the method.
-        Use this if you are orchestrating your own calls to collection_adapter
+        Use this if you are orchestrating your own calls to :func:`.collection_adapter`
         in one of the basic SQLAlchemy interface methods, or to prevent
         an automatic ABC method decoration from wrapping your implementation::
 
@@ -309,7 +311,7 @@ class collection(object):
         return fn
 
     @staticmethod
-    def on_link(fn):
+    def link(fn):
         """Tag the method as a the "linked to attribute" event handler.
 
         This optional event handler will be called when the collection class
@@ -319,7 +321,7 @@ class collection(object):
         that has been linked, or None if unlinking.
 
         """
-        setattr(fn, '_sa_instrument_role', 'on_link')
+        setattr(fn, '_sa_instrument_role', 'link')
         return fn
 
     @staticmethod
@@ -339,7 +341,7 @@ class collection(object):
 
         The default converter implementation will use duck-typing to do the
         conversion.  A dict-like collection will be convert into an iterable
-        of dictionary values, and other types will simply be iterated.
+        of dictionary values, and other types will simply be iterated::
 
             @collection.converter
             def convert(self, other): ...
@@ -442,7 +444,8 @@ class collection(object):
 # public instrumentation interface for 'internally instrumented'
 # implementations
 def collection_adapter(collection):
-    """Fetch the CollectionAdapter for a collection."""
+    """Fetch the :class:`.CollectionAdapter` for a collection."""
+
     return getattr(collection, '_sa_adapter', None)
 
 def collection_iter(collection):
@@ -467,8 +470,11 @@ class CollectionAdapter(object):
     to the underlying Python collection, and emits add/remove events for
     entities entering or leaving the collection.
 
-    The ORM uses an CollectionAdapter exclusively for interaction with
+    The ORM uses :class:`.CollectionAdapter` exclusively for interaction with
     entity collections.
+
+    The usage of getattr()/setattr() is currently to allow injection
+    of custom methods, such as to unwrap Zope security proxies.
 
     """
     def __init__(self, attr, owner_state, data):
@@ -476,7 +482,7 @@ class CollectionAdapter(object):
         self._data = weakref.ref(data)
         self.owner_state = owner_state
         self.link_to_self(data)
-    
+
     @property
     def data(self):
         "The entity collection being adapted."
@@ -485,7 +491,7 @@ class CollectionAdapter(object):
     @util.memoized_property
     def attr(self):
         return self.owner_state.manager[self._key].impl
-        
+
     def link_to_self(self, data):
         """Link a collection to this adapter, and fire a link event."""
         setattr(data, '_sa_adapter', self)
@@ -545,11 +551,18 @@ class CollectionAdapter(object):
 
     def append_with_event(self, item, initiator=None):
         """Add an entity to the collection, firing mutation events."""
+
         getattr(self._data(), '_sa_appender')(item, _sa_initiator=initiator)
 
     def append_without_event(self, item):
         """Add or restore an entity to the collection, firing no events."""
         getattr(self._data(), '_sa_appender')(item, _sa_initiator=False)
+
+    def append_multiple_without_event(self, items):
+        """Add or restore an entity to the collection, firing no events."""
+        appender = getattr(self._data(), '_sa_appender')
+        for item in items:
+            appender(item, _sa_initiator=False)
 
     def remove_with_event(self, item, initiator=None):
         """Remove an entity from the collection, firing mutation events."""
@@ -561,17 +574,21 @@ class CollectionAdapter(object):
 
     def clear_with_event(self, initiator=None):
         """Empty the collection, firing a mutation event for each entity."""
+
+        remover = getattr(self._data(), '_sa_remover')
         for item in list(self):
-            self.remove_with_event(item, initiator)
+            remover(item, _sa_initiator=initiator)
 
     def clear_without_event(self):
         """Empty the collection, firing no events."""
+
+        remover = getattr(self._data(), '_sa_remover')
         for item in list(self):
-            self.remove_without_event(item)
+            remover(item, _sa_initiator=False)
 
     def __iter__(self):
         """Iterate over entities in the collection."""
-        
+
         # Py3K requires iter() here
         return iter(getattr(self._data(), '_sa_iterator')())
 
@@ -585,7 +602,7 @@ class CollectionAdapter(object):
     def fire_append_event(self, item, initiator=None):
         """Notify that a entity has entered the collection.
 
-        Initiator is the InstrumentedAttribute that initiated the membership
+        Initiator is a token owned by the InstrumentedAttribute that initiated the membership
         mutation, and should be left as None unless you are passing along
         an initiator value from a chained operation.
 
@@ -643,14 +660,11 @@ def bulk_replace(values, existing_adapter, new_adapter):
     instances in ``existing_adapter`` not present in ``values`` will have
     remove events fired upon them.
 
-    values
-      An iterable of collection member instances
+    :param values: An iterable of collection member instances
 
-    existing_adapter
-      A CollectionAdapter of instances to be replaced
+    :param existing_adapter: A :class:`.CollectionAdapter` of instances to be replaced
 
-    new_adapter
-      An empty CollectionAdapter to load with ``values``
+    :param new_adapter: An empty :class:`.CollectionAdapter` to load with ``values``
 
 
     """
@@ -780,7 +794,7 @@ def _instrument_class(cls):
         if hasattr(method, '_sa_instrument_role'):
             role = method._sa_instrument_role
             assert role in ('appender', 'remover', 'iterator',
-                            'on_link', 'converter')
+                            'link', 'converter')
             roles[role] = name
 
         # transfer instrumentation requests from decorated function
@@ -905,7 +919,7 @@ def __set(collection, item, _sa_initiator=None):
         if executor:
             item = getattr(executor, 'fire_append_event')(item, _sa_initiator)
     return item
-    
+
 def __del(collection, item, _sa_initiator=None):
     """Run del events, may eventually be inlined into decorators."""
     if _sa_initiator is not False and item is not None:
@@ -966,12 +980,12 @@ def _list_decorators():
                 stop = index.stop or len(self)
                 if stop < 0:
                     stop += len(self)
-                
+
                 if step == 1:
                     for i in xrange(start, stop, step):
                         if len(self) > start:
                             del self[start]
-                    
+
                     for i, item in enumerate(value):
                         self.insert(i + start, item)
                 else:
@@ -1020,7 +1034,7 @@ def _list_decorators():
         _tidy(__delslice__)
         return __delslice__
     # end Py2K
-    
+
     def extend(fn):
         def extend(self, iterable):
             for value in iterable:
@@ -1152,7 +1166,7 @@ def _dict_decorators():
     l.pop('Unspecified')
     return l
 
-if util.py3k:
+if util.py3k_warning:
     _set_binop_bases = (set, frozenset)
 else:
     import sets
@@ -1350,7 +1364,7 @@ class InstrumentedDict(dict):
     __instrumentation__ = {
         'iterator': 'itervalues', }
     # end Py2K
-    
+
 __canned_instrumentation = {
     list: InstrumentedList,
     set: InstrumentedSet,

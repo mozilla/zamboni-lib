@@ -1,3 +1,9 @@
+# connectors/mxodbc.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """
 Provide an SQLALchemy connector for the eGenix mxODBC commercial
 Python adapter for ODBC. This is not a free product, but eGenix
@@ -15,21 +21,18 @@ For more info on mxODBC, see http://www.egenix.com/
 import sys
 import re
 import warnings
-from decimal import Decimal
 
 from sqlalchemy.connectors import Connector
-from sqlalchemy import types as sqltypes
-import sqlalchemy.processors as processors
 
 class MxODBCConnector(Connector):
     driver='mxodbc'
-    
+
     supports_sane_multi_rowcount = False
     supports_unicode_statements = False
     supports_unicode_binds = False
-    
+
     supports_native_decimal = True
-    
+
     @classmethod
     def dbapi(cls):
         # this classmethod will normally be replaced by an instance
@@ -64,7 +67,7 @@ class MxODBCConnector(Connector):
             conn.decimalformat = self.dbapi.DECIMAL_DECIMALFORMAT
             conn.errorhandler = self._error_handler()
         return connect
-    
+
     def _error_handler(self):
         """ Return a handler that adjusts mxODBC's raised Warnings to
         emit Python standard warnings.
@@ -94,7 +97,7 @@ class MxODBCConnector(Connector):
 
         The arg 'errorhandler' is not used by SQLAlchemy and will
         not be populated.
-        
+
         """
         opts = url.translate_connect_args(username='user')
         opts.update(url.query)
@@ -103,9 +106,9 @@ class MxODBCConnector(Connector):
         opts.pop('database', None)
         return (args,), opts
 
-    def is_disconnect(self, e):
-        # eGenix recommends checking connection.closed here,
-        # but how can we get a handle on the current connection?
+    def is_disconnect(self, e, connection, cursor):
+        # TODO: eGenix recommends checking connection.closed here
+        # Does that detect dropped connections ?
         if isinstance(e, self.dbapi.ProgrammingError):
             return "connection already closed" in str(e)
         elif isinstance(e, self.dbapi.Error):

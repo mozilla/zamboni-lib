@@ -1,3 +1,9 @@
+# mysql/zxjdbc.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Support for the MySQL database via Jython's zxjdbc JDBC connector.
 
 JDBC Driver
@@ -92,7 +98,7 @@ class MySQLDialect_zxjdbc(ZxJDBCConnector, MySQLDialect):
     def _extract_error_code(self, exception):
         # e.g.: DBAPIError: (Error) Table 'test.u2' doesn't exist
         # [SQLCode: 1146], [SQLState: 42S02] 'DESCRIBE `u2`' ()
-        m = re.compile(r"\[SQLCode\: (\d+)\]").search(str(exception.orig.args))
+        m = re.compile(r"\[SQLCode\: (\d+)\]").search(str(exception.args))
         c = m.group(1)
         if c:
             return int(c)

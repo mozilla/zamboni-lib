@@ -1,3 +1,9 @@
+# mysql/mysqlconnector.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Support for the MySQL database via the MySQL Connector/Python adapter.
 
 MySQL Connector/Python is available at:
@@ -112,7 +118,7 @@ class MySQLDialect_mysqlconnector(MySQLDialect):
     def _extract_error_code(self, exception):
         return exception.errno
 
-    def is_disconnect(self, e):
+    def is_disconnect(self, e, connection, cursor):
         errnos = (2006, 2013, 2014, 2045, 2055, 2048)
         exceptions = (self.dbapi.OperationalError,self.dbapi.InterfaceError)
         if isinstance(e, exceptions):

@@ -1,3 +1,9 @@
+# engine/reflection.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Provides an abstraction for obtaining database schema information.
 
 Usage Notes:
@@ -21,6 +27,7 @@ methods such as get_table_names, get_columns, etc.
 import sqlalchemy
 from sqlalchemy import exc, sql
 from sqlalchemy import util
+from sqlalchemy.util import topological
 from sqlalchemy.types import TypeEngine
 from sqlalchemy import schema as sa_schema
 
@@ -49,17 +56,17 @@ class Inspector(object):
     :class:`~sqlalchemy.engine.base.Dialect`, providing a
     consistent interface as well as caching support for previously
     fetched metadata.
-    
+
     The preferred method to construct an :class:`.Inspector` is via the
     :meth:`Inspector.from_engine` method.   I.e.::
-    
+
         engine = create_engine('...')
         insp = Inspector.from_engine(engine)
-    
+
     Where above, the :class:`~sqlalchemy.engine.base.Dialect` may opt
     to return an :class:`.Inspector` subclass that provides additional
     methods specific to the dialect's target database.
-    
+
     """
 
     def __init__(self, bind):
@@ -69,23 +76,24 @@ class Inspector(object):
           which is typically an instance of 
           :class:`~sqlalchemy.engine.base.Engine` or 
           :class:`~sqlalchemy.engine.base.Connection`.
-        
+
         For a dialect-specific instance of :class:`.Inspector`, see
         :meth:`Inspector.from_engine`
 
         """
-
-        # ensure initialized
-        bind.connect()
-        
         # this might not be a connection, it could be an engine.
         self.bind = bind
-        
+
         # set the engine
         if hasattr(bind, 'engine'):
             self.engine = bind.engine
         else:
             self.engine = bind
+
+        if self.engine is bind:
+            # if engine, ensure initialized
+            bind.connect().close()
+
         self.dialect = self.engine.dialect
         self.info_cache = {}
 
@@ -97,14 +105,14 @@ class Inspector(object):
           which is typically an instance of 
           :class:`~sqlalchemy.engine.base.Engine` or 
           :class:`~sqlalchemy.engine.base.Connection`.
-        
+
         This method differs from direct a direct constructor call of :class:`.Inspector`
         in that the :class:`~sqlalchemy.engine.base.Dialect` is given a chance to provide
         a dialect-specific :class:`.Inspector` instance, which may provide additional
         methods.
-        
+
         See the example at :class:`.Inspector`.
-        
+
         """
         if hasattr(bind.dialect, 'inspector'):
             return bind.dialect.inspector(bind)
@@ -114,10 +122,10 @@ class Inspector(object):
     def default_schema_name(self):
         """Return the default schema name presented by the dialect
         for the current engine's database user.
-        
+
         E.g. this is typically ``public`` for Postgresql and ``dbo``
         for SQL Server.
-        
+
         """
         return self.dialect.default_schema_name
 
@@ -143,34 +151,26 @@ class Inspector(object):
 
         if hasattr(self.dialect, 'get_table_names'):
             tnames = self.dialect.get_table_names(self.bind,
-            schema,
-                                                    info_cache=self.info_cache)
+            schema, info_cache=self.info_cache)
         else:
             tnames = self.engine.table_names(schema)
         if order_by == 'foreign_key':
-            ordered_tnames = tnames[:]
-            # Order based on foreign key dependencies.
+            import random
+            random.shuffle(tnames)
+
+            tuples = []
             for tname in tnames:
-                table_pos = tnames.index(tname)
-                fkeys = self.get_foreign_keys(tname, schema)
-                for fkey in fkeys:
-                    rtable = fkey['referred_table']
-                    if rtable in ordered_tnames:
-                        ref_pos = ordered_tnames.index(rtable)
-                        # Make sure it's lower in the list than anything it
-                        # references.
-                        if table_pos > ref_pos:
-                            ordered_tnames.pop(table_pos) # rtable moves up 1
-                            # insert just below rtable
-                            ordered_tnames.index(ref_pos, tname)
-            tnames = ordered_tnames
+                for fkey in self.get_foreign_keys(tname, schema):
+                    if tname != fkey['referred_table']:
+                        tuples.append((tname, fkey['referred_table']))
+            tnames = list(topological.sort(tuples, tnames))
         return tnames
 
     def get_table_options(self, table_name, schema=None, **kw):
         """Return a dictionary of options specified when the table of the given name was created.
-        
+
         This currently includes some options that apply to MySQL tables.
-        
+
         """
         if hasattr(self.dialect, 'get_table_options'):
             return self.dialect.get_table_options(self.bind, table_name, schema,
@@ -246,10 +246,10 @@ class Inspector(object):
 
         Given a string `table_name`, and an optional string `schema`, return
         primary key information as a dictionary with these keys:
-        
+
         constrained_columns
           a list of column names that make up the primary key
-        
+
         name
           optional name of the primary key constraint.
 
@@ -259,7 +259,7 @@ class Inspector(object):
                                               **kw)
 
         return pkeys
-        
+
 
     def get_foreign_keys(self, table_name, schema=None, **kw):
         """Return information about foreign_keys in `table_name`.
@@ -282,7 +282,7 @@ class Inspector(object):
 
         name
           optional name of the foreign key constraint.
-          
+
         \**kw
           other options passed to the dialect's get_foreign_keys() method.
 
@@ -307,7 +307,7 @@ class Inspector(object):
 
         unique
           boolean
-          
+
         \**kw
           other options passed to the dialect's get_indexes() method.
         """
@@ -319,31 +319,25 @@ class Inspector(object):
 
     def reflecttable(self, table, include_columns):
         """Given a Table object, load its internal constructs based on introspection.
-        
+
         This is the underlying method used by most dialects to produce 
         table reflection.  Direct usage is like::
-        
+
             from sqlalchemy import create_engine, MetaData, Table
             from sqlalchemy.engine import reflection
-            
+
             engine = create_engine('...')
             meta = MetaData()
             user_table = Table('user', meta)
             insp = Inspector.from_engine(engine)
             insp.reflecttable(user_table, None)
-            
+
         :param table: a :class:`~sqlalchemy.schema.Table` instance.
         :param include_columns: a list of string column names to include
           in the reflection process.  If ``None``, all columns are reflected.
-            
+
         """
         dialect = self.bind.dialect
-
-        # MySQL dialect does this.  Applicable with other dialects?
-        if hasattr(dialect, '_connection_charset') \
-                                        and hasattr(dialect, '_adjust_casing'):
-            charset = dialect._connection_charset
-            dialect._adjust_casing(table)
 
         # table attributes we might need.
         reflection_options = dict(
@@ -375,6 +369,8 @@ class Inspector(object):
         found_table = False
         for col_d in self.get_columns(table_name, schema, **tblkw):
             found_table = True
+            table.dispatch.column_reflect(table, col_d)
+
             name = col_d['name']
             if include_columns and name not in include_columns:
                 continue
@@ -383,17 +379,20 @@ class Inspector(object):
             col_kw = {
                 'nullable':col_d['nullable'],
             }
-            if 'autoincrement' in col_d:
-                col_kw['autoincrement'] = col_d['autoincrement']
-            if 'quote' in col_d:
-                col_kw['quote'] = col_d['quote']
-                
+            for k in ('autoincrement', 'quote', 'info', 'key'):
+                if k in col_d:
+                    col_kw[k] = col_d[k]
+
             colargs = []
             if col_d.get('default') is not None:
                 # the "default" value is assumed to be a literal SQL expression,
                 # so is wrapped in text() so that no quoting occurs on re-issuance.
-                colargs.append(sa_schema.DefaultClause(sql.text(col_d['default'])))
-                
+                colargs.append(
+                    sa_schema.DefaultClause(
+                        sql.text(col_d['default']), _reflected=True
+                    )
+                )
+
             if 'sequence' in col_d:
                 # TODO: mssql, maxdb and sybase are using this.
                 seq = col_d['sequence']
@@ -403,7 +402,7 @@ class Inspector(object):
                 if 'increment' in seq:
                     sequence.increment = seq['increment']
                 colargs.append(sequence)
-                
+
             col = sa_schema.Column(name, coltype, *colargs, **col_kw)
             table.append_column(col)
 

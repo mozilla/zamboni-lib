@@ -1,4 +1,5 @@
-# access.py
+# access/base.py
+# Copyright (C) 2007-2011 the SQLAlchemy authors and contributors <see AUTHORS file>
 # Copyright (C) 2007 Paul Johnston, paj@pajhome.org.uk
 # Portions derived from jet2sql.py by Matt Keranen, mksql@yahoo.com
 #
@@ -8,9 +9,9 @@
 """
 Support for the Microsoft Access database.
 
-This dialect is *not* ported to SQLAlchemy 0.6.
+This dialect is *not* ported to SQLAlchemy 0.6 or 0.7.
 
-This dialect is *not* tested on SQLAlchemy 0.6.
+This dialect is *not* tested on SQLAlchemy 0.6 or 0.7.
 
 
 """
@@ -50,15 +51,10 @@ class AcSmallInteger(types.SmallInteger):
         return "SMALLINT"
 
 class AcDateTime(types.DateTime):
-    def __init__(self, *a, **kw):
-        super(AcDateTime, self).__init__(False)
-
     def get_col_spec(self):
         return "DATETIME"
 
 class AcDate(types.Date):
-    def __init__(self, *a, **kw):
-        super(AcDate, self).__init__(False)
 
     def get_col_spec(self):
         return "DATETIME"
@@ -157,7 +153,7 @@ class AccessDialect(default.DefaultDialect):
     supports_sane_multi_rowcount = False
 
     ported_sqla_06 = False
-    
+
     def type_descriptor(self, typeobj):
         newobj = types.adapt_type(typeobj, self.colspecs)
         return newobj
@@ -345,7 +341,7 @@ class AccessCompiler(compiler.SQLCompiler):
             'dow': 'w',
             'week': 'ww'
     })
-        
+
     def visit_select_precolumns(self, select):
         """Access puts TOP, it's version of LIMIT here """
         s = select.distinct and "DISTINCT " or ""

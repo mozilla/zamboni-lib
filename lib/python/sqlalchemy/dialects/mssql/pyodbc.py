@@ -1,3 +1,9 @@
+# mssql/pyodbc.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """
 Support for MS-SQL via pyodbc.
 
@@ -29,26 +35,30 @@ Examples of pyodbc connection string URLs:
 
     dsn=mydsn;UID=user;PWD=pass;LANGUAGE=us_english
 
-* ``mssql+pyodbc://user:pass@host/db`` - connects using a connection string
-  dynamically created that would appear like::
+* ``mssql+pyodbc://user:pass@host/db`` - connects using a connection 
+  that would appear like::
 
     DRIVER={SQL Server};Server=host;Database=db;UID=user;PWD=pass
 
 * ``mssql+pyodbc://user:pass@host:123/db`` - connects using a connection
-  string that is dynamically created, which also includes the port
-  information using the comma syntax. If your connection string
-  requires the port information to be passed as a ``port`` keyword
-  see the next example. This will create the following connection
-  string::
+  string which includes the port
+  information using the comma syntax. This will create the following 
+  connection string::
 
     DRIVER={SQL Server};Server=host,123;Database=db;UID=user;PWD=pass
 
 * ``mssql+pyodbc://user:pass@host/db?port=123`` - connects using a connection
-  string that is dynamically created that includes the port
+  string that includes the port
   information as a separate ``port`` keyword. This will create the
   following connection string::
 
     DRIVER={SQL Server};Server=host;Database=db;UID=user;PWD=pass;port=123
+
+* ``mssql+pyodbc://user:pass@host/db?driver=MyDriver`` - connects using a connection
+  string that includes a custom
+  ODBC driver name.  This will create the following connection string::
+
+    DRIVER={MyDriver};Server=host;Database=db;UID=user;PWD=pass
 
 If you require a connection string that is outside the options
 presented above, use the ``odbc_connect`` keyword to pass in a
@@ -80,20 +90,25 @@ import decimal
 
 class _MSNumeric_pyodbc(sqltypes.Numeric):
     """Turns Decimals with adjusted() < 0 or > 7 into strings.
-    
+
     This is the only method that is proven to work with Pyodbc+MSSQL
     without crashing (floats can be used but seem to cause sporadic
     crashes).
-    
+
     """
 
     def bind_processor(self, dialect):
-        super_process = super(_MSNumeric_pyodbc, self).bind_processor(dialect)
+
+        super_process = super(_MSNumeric_pyodbc, self).\
+                        bind_processor(dialect)
+
+        if not dialect._need_decimal_fix:
+            return super_process
 
         def process(value):
             if self.asdecimal and \
                     isinstance(value, decimal.Decimal):
-                
+
                 adjusted = value.adjusted()
                 if adjusted < 0:
                     return self._small_dec_to_string(value)
@@ -105,51 +120,55 @@ class _MSNumeric_pyodbc(sqltypes.Numeric):
             else:
                 return value
         return process
-    
+
+    # these routines needed for older versions of pyodbc.
+    # as of 2.1.8 this logic is integrated.
+
     def _small_dec_to_string(self, value):
         return "%s0.%s%s" % (
                     (value < 0 and '-' or ''),
                     '0' * (abs(value.adjusted()) - 1),
-                    "".join([str(nint) for nint in value._int]))
+                    "".join([str(nint) for nint in value.as_tuple()[1]]))
 
     def _large_dec_to_string(self, value):
+        _int = value.as_tuple()[1]
         if 'E' in str(value):
             result = "%s%s%s" % (
                     (value < 0 and '-' or ''),
-                    "".join([str(s) for s in value._int]),
-                    "0" * (value.adjusted() - (len(value._int)-1)))
+                    "".join([str(s) for s in _int]),
+                    "0" * (value.adjusted() - (len(_int)-1)))
         else:
-            if (len(value._int) - 1) > value.adjusted():
+            if (len(_int) - 1) > value.adjusted():
                 result = "%s%s.%s" % (
                 (value < 0 and '-' or ''),
                 "".join(
-                    [str(s) for s in value._int][0:value.adjusted() + 1]),
+                    [str(s) for s in _int][0:value.adjusted() + 1]),
                 "".join(
-                    [str(s) for s in value._int][value.adjusted() + 1:]))
+                    [str(s) for s in _int][value.adjusted() + 1:]))
             else:
                 result = "%s%s" % (
                 (value < 0 and '-' or ''),
                 "".join(
-                    [str(s) for s in value._int][0:value.adjusted() + 1]))
+                    [str(s) for s in _int][0:value.adjusted() + 1]))
         return result
-    
-    
+
+
 class MSExecutionContext_pyodbc(MSExecutionContext):
     _embedded_scope_identity = False
-    
+
     def pre_exec(self):
         """where appropriate, issue "select scope_identity()" in the same
         statement.
-        
+
         Background on why "scope_identity()" is preferable to "@@identity":
         http://msdn.microsoft.com/en-us/library/ms190315.aspx
-        
+
         Background on why we attempt to embed "scope_identity()" into the same
         statement as the INSERT:
         http://code.google.com/p/pyodbc/wiki/FAQs#How_do_I_retrieve_autogenerated/identity_values?
-        
+
         """
-        
+
         super(MSExecutionContext_pyodbc, self).pre_exec()
 
         # don't embed the scope_identity select into an 
@@ -158,7 +177,7 @@ class MSExecutionContext_pyodbc(MSExecutionContext):
                 self.dialect.use_scope_identity and \
                 len(self.parameters[0]):
             self._embedded_scope_identity = True
-            
+
             self.statement += "; select scope_identity()"
 
     def post_exec(self):
@@ -170,13 +189,13 @@ class MSExecutionContext_pyodbc(MSExecutionContext):
                 try:
                     # fetchall() ensures the cursor is consumed 
                     # without closing it (FreeTDS particularly)
-                    row = self.cursor.fetchall()[0]  
+                    row = self.cursor.fetchall()[0]
                     break
                 except self.dialect.dbapi.Error, e:
                     # no way around this - nextset() consumes the previous set
                     # so we need to just keep flipping
                     self.cursor.nextset()
-                    
+
             self._lastrowid = int(row[0])
         else:
             super(MSExecutionContext_pyodbc, self).post_exec()
@@ -187,18 +206,20 @@ class MSDialect_pyodbc(PyODBCConnector, MSDialect):
     execution_ctx_cls = MSExecutionContext_pyodbc
 
     pyodbc_driver_name = 'SQL Server'
-    
+
     colspecs = util.update_copy(
         MSDialect.colspecs,
         {
             sqltypes.Numeric:_MSNumeric_pyodbc
         }
     )
-    
+
     def __init__(self, description_encoding='latin-1', **params):
         super(MSDialect_pyodbc, self).__init__(**params)
         self.description_encoding = description_encoding
         self.use_scope_identity = self.dbapi and \
                         hasattr(self.dbapi.Cursor, 'nextset')
-        
+        self._need_decimal_fix = self.dbapi and \
+                            self._dbapi_version() < (2, 1, 8)
+
 dialect = MSDialect_pyodbc

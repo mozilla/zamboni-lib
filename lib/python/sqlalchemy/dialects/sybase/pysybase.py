@@ -1,5 +1,5 @@
-# pysybase.py
-# Copyright (C) 2010 Michael Bayer mike_mp@zzzcomputing.com
+# sybase/pysybase.py
+# Copyright (C) 2010-2011 the SQLAlchemy authors and contributors <see AUTHORS file>
 #
 # This module is part of SQLAlchemy and is released under
 # the MIT License: http://www.opensource.org/licenses/mit-license.php
@@ -54,7 +54,7 @@ class SybaseExecutionContext_pysybase(SybaseExecutionContext):
 class SybaseSQLCompiler_pysybase(SybaseSQLCompiler):
     def bindparam_string(self, name):
         return "@" + name
-   
+
 class SybaseDialect_pysybase(SybaseDialect):
     driver = 'pysybase'
     execution_ctx_cls = SybaseExecutionContext_pysybase
@@ -87,7 +87,7 @@ class SybaseDialect_pysybase(SybaseDialect):
        # (12, 5, 0, 0)
        return (vers / 1000, vers % 1000 / 100, vers % 100 / 10, vers % 10)
 
-    def is_disconnect(self, e):
+    def is_disconnect(self, e, connection, cursor):
         if isinstance(e, (self.dbapi.OperationalError,
                             self.dbapi.ProgrammingError)):
             msg = str(e)

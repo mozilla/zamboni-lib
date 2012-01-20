@@ -1,3 +1,9 @@
+# mysql/pyodbc.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """Support for the MySQL database via the pyodbc adapter.
 
 pyodbc is available at:
@@ -41,7 +47,7 @@ class MySQLDialect_pyodbc(PyODBCConnector, MySQLDialect):
     execution_ctx_cls = MySQLExecutionContext_pyodbc
 
     pyodbc_driver_name = "MySQL"
-    
+
     def __init__(self, **kw):
         # deal with http://code.google.com/p/pyodbc/issues/detail?id=25
         kw.setdefault('convert_unicode', True)
@@ -64,7 +70,7 @@ class MySQLDialect_pyodbc(PyODBCConnector, MySQLDialect):
 
         util.warn("Could not detect the connection character set.  Assuming latin1.")
         return 'latin1'
-    
+
     def _extract_error_code(self, exception):
         m = re.compile(r"\((\d+)\)").search(str(exception.args))
         c = m.group(1)

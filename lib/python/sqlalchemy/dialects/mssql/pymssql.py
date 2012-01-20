@@ -1,3 +1,9 @@
+# mssql/pymssql.py
+# Copyright (C) 2005-2012 the SQLAlchemy authors and contributors <see AUTHORS file>
+#
+# This module is part of SQLAlchemy and is released under
+# the MIT License: http://www.opensource.org/licenses/mit-license.php
+
 """
 Support for the pymssql dialect.
 
@@ -6,10 +12,10 @@ This dialect supports pymssql 1.0 and greater.
 pymssql is available at:
 
     http://pymssql.sourceforge.net/
-    
+
 Connecting
 ^^^^^^^^^^
-    
+
 Sample connect string::
 
     mssql+pymssql://<username>:<password>@<freetds_name>
@@ -35,7 +41,6 @@ Please consult the pymssql documentation for further information.
 from sqlalchemy.dialects.mssql.base import MSDialect
 from sqlalchemy import types as sqltypes, util, processors
 import re
-import decimal
 
 class _MSNumeric_pymssql(sqltypes.Numeric):
     def result_processor(self, dialect, type_):
@@ -48,7 +53,7 @@ class MSDialect_pymssql(MSDialect):
     supports_sane_rowcount = False
     max_identifier_length = 30
     driver = 'pymssql'
-    
+
     colspecs = util.update_copy(
         MSDialect.colspecs,
         {
@@ -62,7 +67,7 @@ class MSDialect_pymssql(MSDialect):
         # pymmsql doesn't have a Binary method.  we use string
         # TODO: monkeypatching here is less than ideal
         module.Binary = str
-        
+
         client_ver = tuple(int(x) for x in module.__version__.split("."))
         if client_ver < (1, ):
             util.warn("The pymssql dialect expects at least "
@@ -85,10 +90,12 @@ class MSDialect_pymssql(MSDialect):
     def create_connect_args(self, url):
         opts = url.translate_connect_args(username='user')
         opts.update(url.query)
-        opts.pop('port', None)
+        port = opts.pop('port', None)
+        if port and 'host' in opts:
+            opts['host'] = "%s:%s" % (opts['host'], port)
         return [[], opts]
 
-    def is_disconnect(self, e):
+    def is_disconnect(self, e, connection, cursor):
         for msg in (
             "Error 10054",
             "Not connected to any MS SQL server",
