@@ -160,3 +160,6 @@
 [submodule "src/addon-sdk-docs-1.4"]
 	path = src/addon-sdk-docs-1.4
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/django-browserid"]
+	path = src/django-browserid
+	url = git://github.com/mozilla/django-browserid.git
