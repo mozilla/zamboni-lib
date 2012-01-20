@@ -163,3 +163,6 @@
 [submodule "src/django-browserid"]
 	path = src/django-browserid
 	url = git://github.com/mozilla/django-browserid.git
+[submodule "src/django-mysql-pool"]
+	path = src/django-mysql-pool
+	url = git://github.com/andymckay/django-mysql-pool.git

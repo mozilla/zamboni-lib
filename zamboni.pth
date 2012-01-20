@@ -18,6 +18,7 @@ src/django-fixture-magic
 src/django-mobility
 src/django-mozilla-product-details
 src/django-multidb-router
+src/django-mysql-pool
 src/django-nose
 src/django-piston-oauth2
 src/django-pylibmc
