@@ -10,6 +10,8 @@ from django.utils.cache import patch_vary_headers
 
 ANON_COOKIE = getattr(settings, 'ANON_COOKIE', 'anoncsrf')
 ANON_TIMEOUT = getattr(settings, 'ANON_TIMEOUT', 60 * 60 * 2)  # 2 hours.
+ANON_ALWAYS = getattr(settings, 'ANON_ALWAYS', False)
+PREFIX = 'sessioncsrf:'
 
 
 # This overrides django.core.context_processors.csrf to dump our csrf_token
@@ -43,11 +45,20 @@ class CsrfMiddleware(object):
                 request.csrf_token = request.session['csrf_token'] = token
             else:
                 request.csrf_token = request.session['csrf_token']
-        elif ANON_COOKIE in request.COOKIES:
-            key = request.COOKIES[ANON_COOKIE]
-            request.csrf_token = cache.get(key, '')
         else:
-            request.csrf_token = ''
+            key = None
+            token = ''
+            if ANON_COOKIE in request.COOKIES:
+                key = request.COOKIES[ANON_COOKIE]
+                token = cache.get(PREFIX + key, '')
+            if ANON_ALWAYS:
+                if not key:
+                    key = django_csrf._get_new_csrf_key()
+                if not token:
+                    token = django_csrf._get_new_csrf_key()
+                request._anon_csrf_key = key
+                cache.set(PREFIX + key, token, ANON_TIMEOUT)
+            request.csrf_token = token
 
     def process_view(self, request, view_func, args, kwargs):
         """Check the CSRF token if this is a POST."""
@@ -62,8 +73,8 @@ class CsrfMiddleware(object):
             and not request.user.is_authenticated()):
             return
 
-        # Bail if this isn't a POST.
-        if request.method != 'POST':
+        # Bail if this is a safe method.
+        if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
             return self._accept(request)
 
         # The test client uses this to get around CSRF processing.
@@ -89,23 +100,32 @@ class CsrfMiddleware(object):
         else:
             return self._accept(request)
 
+    def process_response(self, request, response):
+        if hasattr(request, '_anon_csrf_key'):
+            # Set or reset the cache and cookie timeouts.
+            response.set_cookie(ANON_COOKIE, request._anon_csrf_key,
+                                max_age=ANON_TIMEOUT, httponly=True,
+                                secure=request.is_secure())
+            patch_vary_headers(response, ['Cookie'])
+        return response
+
 
 def anonymous_csrf(f):
     """Decorator that assigns a CSRF token to an anonymous user."""
     @functools.wraps(f)
     def wrapper(request, *args, **kw):
-        anon = not request.user.is_authenticated()
-        if anon:
+        use_anon_cookie = not (request.user.is_authenticated() or ANON_ALWAYS)
+        if use_anon_cookie:
             if ANON_COOKIE in request.COOKIES:
                 key = request.COOKIES[ANON_COOKIE]
-                token = cache.get(key) or django_csrf._get_new_csrf_key()
+                token = cache.get(PREFIX + key) or django_csrf._get_new_csrf_key()
             else:
                 key = django_csrf._get_new_csrf_key()
                 token = django_csrf._get_new_csrf_key()
-            cache.set(key, token, ANON_TIMEOUT)
+            cache.set(PREFIX + key, token, ANON_TIMEOUT)
             request.csrf_token = token
         response = f(request, *args, **kw)
-        if anon:
+        if use_anon_cookie:
             # Set or reset the cache and cookie timeouts.
             response.set_cookie(ANON_COOKIE, key, max_age=ANON_TIMEOUT,
                                 httponly=True, secure=request.is_secure())
