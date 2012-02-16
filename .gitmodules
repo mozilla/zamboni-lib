@@ -163,3 +163,6 @@
 [submodule "src/django-mysql-pool"]
 	path = src/django-mysql-pool
 	url = git://github.com/andymckay/django-mysql-pool.git
+[submodule "src/addon-sdk-docs-1.5"]
+	path = src/addon-sdk-docs-1.5
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
