@@ -1,23 +1,40 @@
-from __future__ import generators
+# -*- coding: utf-8 -*-
+"""
+    celery.utils
+    ~~~~~~~~~~~~
+
+    Utility functions.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+from __future__ import with_statement
 
 import os
 import sys
 import operator
+import imp as _imp
 import importlib
 import logging
 import threading
 import traceback
 import warnings
 
+from contextlib import contextmanager
+from functools import partial, wraps
 from inspect import getargspec
 from itertools import islice
 from pprint import pprint
 
-from kombu.utils import gen_unique_id, rpartition, cached_property
+from kombu.utils import cached_property, gen_unique_id, kwdict  # noqa
+from kombu.utils import reprcall, reprkwargs                    # noqa
+from kombu.utils.functional import promise, maybe_promise       # noqa
+uuid = gen_unique_id
 
-from celery.utils.compat import StringIO
-from celery.utils.functional import partial, wraps
-
+from ..exceptions import CPendingDeprecationWarning, CDeprecationWarning
+from .compat import StringIO, reload
 
 LOG_LEVELS = dict(logging._levelNames)
 LOG_LEVELS["FATAL"] = logging.FATAL
@@ -35,6 +52,18 @@ DEPRECATION_FMT = """
 """
 
 
+def warn_deprecated(description=None, deprecation=None, removal=None,
+        alternative=None):
+    ctx = {"description": description,
+           "deprecation": deprecation, "removal": removal,
+           "alternative": alternative}
+    if deprecation is not None:
+        w = CPendingDeprecationWarning(PENDING_DEPRECATION_FMT % ctx)
+    else:
+        w = CDeprecationWarning(DEPRECATION_FMT % ctx)
+    warnings.warn(w)
+
+
 def deprecated(description=None, deprecation=None, removal=None,
         alternative=None):
 
@@ -42,14 +71,10 @@ def deprecated(description=None, deprecation=None, removal=None,
 
         @wraps(fun)
         def __inner(*args, **kwargs):
-            ctx = {"description": description or get_full_cls_name(fun),
-                   "deprecation": deprecation, "removal": removal,
-                   "alternative": alternative}
-            if deprecation is not None:
-                w = PendingDeprecationWarning(PENDING_DEPRECATION_FMT % ctx)
-            else:
-                w = DeprecationWarning(DEPRECATION_FMT % ctx)
-            warnings.warn(w)
+            warn_deprecated(description=description or qualname(fun),
+                            deprecation=deprecation,
+                            removal=removal,
+                            alternative=alternative)
             return fun(*args, **kwargs)
         return __inner
     return _inner
@@ -59,52 +84,6 @@ def lpmerge(L, R):
     """Left precedent dictionary merge.  Keeps values from `l`, if the value
     in `r` is :const:`None`."""
     return dict(L, **dict((k, v) for k, v in R.iteritems() if v is not None))
-
-
-class promise(object):
-    """A promise.
-
-    Evaluated when called or if the :meth:`evaluate` method is called.
-    The function is evaluated on every access, so the value is not
-    memoized (see :class:`mpromise`).
-
-    Overloaded operations that will evaluate the promise:
-        :meth:`__str__`, :meth:`__repr__`, :meth:`__cmp__`.
-
-    """
-
-    def __init__(self, fun, *args, **kwargs):
-        self._fun = fun
-        self._args = args
-        self._kwargs = kwargs
-
-    def __call__(self):
-        return self.evaluate()
-
-    def evaluate(self):
-        return self._fun(*self._args, **self._kwargs)
-
-    def __str__(self):
-        return str(self())
-
-    def __repr__(self):
-        return repr(self())
-
-    def __cmp__(self, rhs):
-        if isinstance(rhs, self.__class__):
-            return -cmp(rhs, self())
-        return cmp(self(), rhs)
-
-    def __eq__(self, rhs):
-        return self() == rhs
-
-    def __deepcopy__(self, memo):
-        memo[id(self)] = self
-        return self
-
-    def __reduce__(self):
-        return (self.__class__, (self._fun, ), {"_args": self._args,
-                                                "_kwargs": self._kwargs})
 
 
 class mpromise(promise):
@@ -128,13 +107,6 @@ class mpromise(promise):
         return self._value
 
 
-def maybe_promise(value):
-    """Evaluates if the value is a promise."""
-    if isinstance(value, promise):
-        return value.evaluate()
-    return value
-
-
 def noop(*args, **kwargs):
     """No operation.
 
@@ -142,17 +114,6 @@ def noop(*args, **kwargs):
 
     """
     pass
-
-
-def kwdict(kwargs):
-    """Make sure keyword arguments are not in unicode.
-
-    This should be fixed in newer Python versions,
-      see: http://bugs.python.org/issue4978.
-
-    """
-    return dict((key.encode("utf-8"), value)
-                    for key, value in kwargs.items())
 
 
 def first(predicate, iterable):
@@ -234,10 +195,19 @@ def mattrgetter(*attrs):
                                 for attr in attrs)
 
 
-def get_full_cls_name(cls):
-    """With a class, get its full module and class name."""
-    return ".".join([cls.__module__,
-                     cls.__name__])
+if sys.version_info >= (3, 3):
+
+    def qualname(obj):
+        return obj.__qualname__
+
+else:
+
+    def qualname(obj):  # noqa
+        if not hasattr(obj, "__name__") and hasattr(obj, "__class__"):
+            return qualname(obj.__class__)
+
+        return '.'.join([obj.__module__, obj.__name__])
+get_full_cls_name = qualname  # XXX Compat
 
 
 def fun_takes_kwargs(fun, kwlist=[]):
@@ -269,7 +239,8 @@ def fun_takes_kwargs(fun, kwlist=[]):
     return filter(partial(operator.contains, args), kwlist)
 
 
-def get_cls_by_name(name, aliases={}, imp=None):
+def get_cls_by_name(name, aliases={}, imp=None, package=None,
+        sep='.', **kwargs):
     """Get class by name.
 
     The name should be the full dot-separated path to the class::
@@ -280,6 +251,10 @@ def get_cls_by_name(name, aliases={}, imp=None):
 
         celery.concurrency.processes.TaskPool
                                     ^- class name
+
+    or using ':' to separate module and symbol::
+
+        celery.concurrency.processes:TaskPool
 
     If `aliases` is provided, a dict containing short name/long name
     mappings, the name is looked up in the aliases first.
@@ -306,11 +281,15 @@ def get_cls_by_name(name, aliases={}, imp=None):
         return name                                 # already a class
 
     name = aliases.get(name) or name
-    module_name, _, cls_name = rpartition(name, ".")
+    sep = ':' if ':' in name else sep
+    module_name, _, cls_name = name.rpartition(sep)
+    if not module_name and package:
+        module_name = package
     try:
-        module = imp(module_name)
+        module = imp(module_name, package=package, **kwargs)
     except ValueError, exc:
-        raise ValueError("Couldn't import %r: %s" % (name, exc))
+        raise ValueError, ValueError(
+                "Couldn't import %r: %s" % (name, exc)), sys.exc_info()[2]
     return getattr(module, cls_name)
 
 get_symbol_by_name = get_cls_by_name
@@ -332,6 +311,12 @@ def truncate_text(text, maxlen=128, suffix="..."):
     return text
 
 
+def pluralize(n, text, suffix='s'):
+    if n > 1:
+        return text + suffix
+    return text
+
+
 def abbr(S, max, ellipsis="..."):
     if S is None:
         return "???"
@@ -344,7 +329,7 @@ def abbrtask(S, max):
     if S is None:
         return "???"
     if len(S) > max:
-        module, _, cls = rpartition(S, ".")
+        module, _, cls = S.rpartition(".")
         module = abbr(module, max - len(cls) - 3, False)
         return module + "[.]" + cls
     return S
@@ -361,7 +346,46 @@ def textindent(t, indent=0):
         return "\n".join(" " * indent + p for p in t.split("\n"))
 
 
-def import_from_cwd(module, imp=None):
+@contextmanager
+def cwd_in_path():
+    cwd = os.getcwd()
+    if cwd in sys.path:
+        yield
+    else:
+        sys.path.insert(0, cwd)
+        try:
+            yield cwd
+        finally:
+            try:
+                sys.path.remove(cwd)
+            except ValueError:
+                pass
+
+
+class NotAPackage(Exception):
+    pass
+
+
+def find_module(module, path=None, imp=None):
+    """Version of :func:`imp.find_module` supporting dots."""
+    if imp is None:
+        imp = importlib.import_module
+    with cwd_in_path():
+        if "." in module:
+            last = None
+            parts = module.split(".")
+            for i, part in enumerate(parts[:-1]):
+                mpart = imp(".".join(parts[:i + 1]))
+                try:
+                    path = mpart.__path__
+                except AttributeError:
+                    raise NotAPackage(module)
+                last = _imp.find_module(parts[i + 1], path)
+            return last
+        return _imp.find_module(module)
+
+
+def import_from_cwd(module, imp=None, package=None):
     """Import module, but make sure it finds modules
     located in the current directory.
 
@@ -370,20 +394,18 @@ def import_from_cwd(module, imp=None):
     """
     if imp is None:
         imp = importlib.import_module
-    cwd = os.getcwd()
-    if cwd in sys.path:
-        return imp(module)
-    sys.path.insert(0, cwd)
-    try:
-        return imp(module)
-    finally:
-        try:
-            sys.path.remove(cwd)
-        except ValueError:
-            pass
+    with cwd_in_path():
+        return imp(module, package=package)
 
 
-def cry():
+def reload_from_cwd(module, reloader=None):
+    if reloader is None:
+        reloader = reload
+    with cwd_in_path():
+        return reloader(module)
+
+
+def cry():  # pragma: no cover
     """Return stacktrace of all active threads.
 
     From https://gist.github.com/737056
@@ -400,14 +422,38 @@ def cry():
             main_thread = t
 
     out = StringIO()
+    sep = "=" * 49 + "\n"
     for tid, frame in sys._current_frames().iteritems():
         thread = tmap.get(tid, main_thread)
+        if not thread:
+            # skip old junk (left-overs from a fork)
+            continue
         out.write("%s\n" % (thread.getName(), ))
-        out.write("=================================================\n")
+        out.write(sep)
         traceback.print_stack(frame, file=out)
-        out.write("=================================================\n")
+        out.write(sep)
         out.write("LOCAL VARIABLES\n")
-        out.write("=================================================\n")
+        out.write(sep)
         pprint(frame.f_locals, stream=out)
         out.write("\n\n")
     return out.getvalue()
+
+
+def uniq(it):
+    seen = set()
+    for obj in it:
+        if obj not in seen:
+            yield obj
+            seen.add(obj)
+
+
+def maybe_reraise():
+    """Reraise if an exception is currently being handled, or return
+    otherwise."""
+    type_, exc, tb = sys.exc_info()
+    try:
+        if tb:
+            raise type_, exc, tb
+    finally:
+        # see http://docs.python.org/library/sys.html#sys.exc_info
+        del(tb)

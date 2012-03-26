@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 """
 "Safe weakrefs", originally from pyDispatcher.
 
 Provides a way to safely weakref any function, including bound methods (which
 aren't handled by the core weakref module).
 """
+from __future__ import absolute_import
 
 import weakref
 import traceback
@@ -195,7 +197,6 @@ class BoundMethodWeakref(object):
             function = self.weak_func()
             if function is not None:
                 return function.__get__(target)
-        return None
 
 
 class BoundNonDescriptorMethodWeakref(BoundMethodWeakref):
@@ -266,7 +267,6 @@ class BoundNonDescriptorMethodWeakref(BoundMethodWeakref):
                 # arguments it supports, and pydispatcher needs this
                 # information.
                 return getattr(target, function.__name__)
-        return None
 
 
 def get_bound_method_weakref(target, on_delete):

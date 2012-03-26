@@ -1,12 +1,33 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.worker.buckets
+    ~~~~~~~~~~~~~~~~~~~~~
+
+    This module implements the rate limiting of tasks,
+    by having a token bucket queue for each task type.
+    When a task is allowed to be processed it's moved
+    over the the ``ready_queue``
+
+    The :mod:`celery.worker.mediator` is then responsible
+    for moving tasks from the ``ready_queue`` to the worker pool.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import threading
 
 from collections import deque
 from time import time, sleep
 from Queue import Queue, Empty
 
-from celery.datastructures import TokenBucket
-from celery.utils import timeutils
-from celery.utils.compat import all, izip_longest, chain_from_iterable
+from kombu.utils.limits import TokenBucket
+
+from ..utils import timeutils
+from ..utils.compat import zip_longest, chain_from_iterable
 
 
 class RateLimitExceeded(Exception):
@@ -23,11 +44,11 @@ class TaskBucket(object):
     while the :meth:`get` operation iterates over the buckets and retrieves
     the first available item.
 
-    Say we have three types of tasks in the registry: `celery.ping`,
+    Say we have three types of tasks in the registry: `twitter.update`,
     `feed.refresh` and `video.compress`, the TaskBucket will consist
     of the following items::
 
-        {"celery.ping": TokenBucketQueue(fill_rate=300),
+        {"twitter.update": TokenBucketQueue(fill_rate=300),
          "feed.refresh": Queue(),
          "video.compress": TokenBucketQueue(fill_rate=2)}
 
@@ -49,16 +70,13 @@ class TaskBucket(object):
         self.not_empty = threading.Condition(self.mutex)
 
     def put(self, request):
-        """Put a :class:`~celery.worker.job.TaskRequest` into
+        """Put a :class:`~celery.worker.job.Request` into
         the appropiate bucket."""
-        self.mutex.acquire()
-        try:
-            if request.task_name not in self.buckets:
-                self.add_bucket_for_type(request.task_name)
-            self.buckets[request.task_name].put_nowait(request)
+        if request.task_name not in self.buckets:
+            self.add_bucket_for_type(request.task_name)
+        self.buckets[request.task_name].put_nowait(request)
+        with self.mutex:
             self.not_empty.notify()
-        finally:
-            self.mutex.release()
     put_nowait = put
 
     def _get_immediate(self):
@@ -110,27 +128,25 @@ class TaskBucket(object):
         consume tokens from it.
 
         """
-        time_start = time()
-        did_timeout = lambda: timeout and time() - time_start > timeout
+        tstart = time()
+        get = self._get
+        not_empty = self.not_empty
 
-        self.not_empty.acquire()
-        try:
-            while True:
+        with not_empty:
+            while 1:
                 try:
-                    remaining_time, item = self._get()
+                    remaining_time, item = get()
                 except Empty:
-                    if not block or did_timeout():
+                    if not block or (timeout and time() - tstart > timeout):
                         raise
-                    self.not_empty.wait(timeout)
+                    not_empty.wait(timeout)
                     continue
                 if remaining_time:
-                    if not block or did_timeout():
+                    if not block or (timeout and time() - tstart > timeout):
                         raise Empty()
                     sleep(min(remaining_time, timeout or 1))
                 else:
                     return item
-        finally:
-            self.not_empty.release()
 
     def get_nowait(self):
         return self.get(block=False)
@@ -202,7 +218,7 @@ class TaskBucket(object):
         """Flattens the data in all of the buckets into a single list."""
         # for queues with contents [(1, 2), (3, 4), (5, 6), (7, 8)]
         # zips and flattens to [1, 3, 5, 7, 2, 4, 6, 8]
-        return filter(None, chain_from_iterable(izip_longest(*[bucket.items
+        return filter(None, chain_from_iterable(zip_longest(*[bucket.items
                                     for bucket in self.buckets.values()])))
 
 
@@ -301,10 +317,12 @@ class TokenBucketQueue(object):
     def wait(self, block=False):
         """Wait until a token can be retrieved from the bucket and return
         the next item."""
-        while True:
-            remaining = self.expected_time()
+        get = self.get
+        expected_time = self.expected_time
+        while 1:
+            remaining = expected_time()
             if not remaining:
-                return self.get(block=block)
+                return get(block=block)
             sleep(remaining)
 
     def expected_time(self, tokens=1):

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """celerybeat
 
 .. program:: celerybeat
@@ -22,36 +22,44 @@
     `ERROR`, `CRITICAL`, or `FATAL`.
 
 """
-from celery.bin.base import Command, Option, daemon_options
-from celery.platforms import create_daemon_context
-from celery.utils.functional import partial
+from __future__ import with_statement
+from __future__ import absolute_import
+
+if __name__ == "__main__" and __package__ is None:
+    __package__ = "celery.bin.celerybeat"
+
+import os
+
+from functools import partial
+
+from ..platforms import detached
+
+from .base import Command, Option, daemon_options
 
 
 class BeatCommand(Command):
+    enable_config_from_cmdline = True
     supports_args = False
+    preload_options = (Command.preload_options
+                     + daemon_options(default_pidfile="celerybeat.pid"))
 
     def run(self, detach=False, logfile=None, pidfile=None, uid=None,
             gid=None, umask=None, working_directory=None, **kwargs):
+        workdir = working_directory
         kwargs.pop("app", None)
+        beat = partial(self.app.Beat,
+                       logfile=logfile, pidfile=pidfile, **kwargs)
 
-        beat = partial(self.app.Beat, logfile=logfile, pidfile=pidfile,
-                       **kwargs)
-
-        if not detach:
+        if detach:
+            with detached(logfile, pidfile, uid, gid, umask, workdir):
+                return beat().run()
+        else:
             return beat().run()
 
-        context, on_stop = create_daemon_context(
-                                logfile=logfile,
-                                pidfile=pidfile,
-                                uid=uid,
-                                gid=gid,
-                                umask=umask,
-                                working_directory=working_directory)
-        context.open()
-        try:
-            beat().run()
-        finally:
-            on_stop()
+    def prepare_preload_options(self, options):
+        workdir = options.get("working_directory")
+        if workdir:
+            os.chdir(workdir)
 
     def get_options(self):
         conf = self.app.conf
@@ -67,19 +75,17 @@ class BeatCommand(Command):
                     "'.db' will be appended to the filename. Default: %s" % (
                             conf.CELERYBEAT_SCHEDULE_FILENAME, )),
             Option('--max-interval',
-                default=3600.0, type="float", dest="max_interval",
+                default=None, type="float", dest="max_interval",
                 help="Max. seconds to sleep between schedule iterations."),
             Option('-S', '--scheduler',
                 default=None,
                 action="store", dest="scheduler_cls",
                 help="Scheduler class. Default is "
-                     "celery.beat.PersistentScheduler"),
+                     "celery.beat:PersistentScheduler"),
             Option('-l', '--loglevel',
                 default=conf.CELERYBEAT_LOG_LEVEL,
                 action="store", dest="loglevel",
-                help="Loglevel. One of DEBUG/INFO/WARNING/ERROR/CRITICAL."),
-        ) + daemon_options(default_pidfile="celerybeat.pid",
-                           default_logfile=conf.CELERYBEAT_LOG_FILE)
+                help="Loglevel. One of DEBUG/INFO/WARNING/ERROR/CRITICAL."))
 
 
 def main():

@@ -1,10 +1,49 @@
-class LocalProxy(object):
-    """Code stolen from werkzeug.local.LocalProxy."""
+# -*- coding: utf-8 -*-
+"""
+    celery.local
+    ~~~~~~~~~~~~
+
+    This module contains critical utilities that
+    needs to be loaded as soon as possible, and that
+    shall not load any third party modules.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
+
+def try_import(module):
+    """Try to import and return module, or return
+    None if the module does not exist."""
+    from importlib import import_module
+    try:
+        return import_module(module)
+    except ImportError:
+        pass
+
+
+class Proxy(object):
+    """Proxy to another object."""
+
+    # Code stolen from werkzeug.local.Proxy.
     __slots__ = ('__local', '__dict__', '__name__')
 
     def __init__(self, local, name=None):
-        object.__setattr__(self, '_LocalProxy__local', local)
-        object.__setattr__(self, '__name__', name)
+        object.__setattr__(self, '_Proxy__local', local)
+        object.__setattr__(self, '__custom_name__', name)
+
+    @property
+    def __name__(self):
+        try:
+            return object.__getattr__(self, "__custom_name__")
+        except AttributeError:
+            return self._get_current_object().__name__
+
+    @property
+    def __doc__(self):
+        return self._get_current_object().__doc__
 
     def _get_current_object(self):
         """Return the current object.  This is useful if you want the real

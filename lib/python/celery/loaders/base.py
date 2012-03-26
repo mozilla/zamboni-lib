@@ -1,17 +1,33 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.loaders.base
+    ~~~~~~~~~~~~~~~~~~~
+
+    Loader base class.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import importlib
 import os
 import re
+import traceback
 import warnings
 
 from anyjson import deserialize
-from kombu.utils import cached_property
+from datetime import datetime
 
-from celery.datastructures import DictAttribute
-from celery.exceptions import ImproperlyConfigured
-from celery.utils import get_cls_by_name
-from celery.utils import import_from_cwd as _import_from_cwd
+from ..datastructures import DictAttribute
+from ..exceptions import ImproperlyConfigured
+from ..utils import (cached_property, get_cls_by_name,
+                     import_from_cwd as _import_from_cwd)
+from ..utils.functional import maybe_list
+from ..utils.encoding import safe_str
 
-BUILTIN_MODULES = ["celery.task"]
+BUILTIN_MODULES = frozenset(["celery.task"])
 
 ERROR_ENVVAR_NOT_SET = (
 """The environment variable %r is not set,
@@ -23,7 +39,7 @@ a configuration module.""")
 class BaseLoader(object):
     """The base class for loaders.
 
-    Loaders handles to following things:
+    Loaders handles,
 
         * Reading celery client/worker configurations.
 
@@ -36,14 +52,21 @@ class BaseLoader(object):
         * What modules are imported to find tasks?
 
     """
-    worker_initialized = False
-    override_backends = {}
+    builtin_modules = BUILTIN_MODULES
     configured = False
+    error_envvar_not_set = ERROR_ENVVAR_NOT_SET
+    override_backends = {}
+    worker_initialized = False
+
     _conf = None
 
     def __init__(self, app=None, **kwargs):
-        from celery.app import app_or_default
+        from ..app import app_or_default
         self.app = app_or_default(app)
+        self.task_modules = set()
+
+    def now(self):
+        return datetime.utcnow()
 
     def on_task_init(self, task_id, task):
         """This method is called before a task is executed."""
@@ -58,39 +81,50 @@ class BaseLoader(object):
         starts."""
         pass
 
+    def on_worker_process_init(self):
+        """This method is called when a child process starts."""
+        pass
+
     def import_task_module(self, module):
+        self.task_modules.add(module)
         return self.import_from_cwd(module)
 
-    def import_module(self, module):
-        return importlib.import_module(module)
+    def import_module(self, module, package=None):
+        return importlib.import_module(module, package=package)
 
-    def import_from_cwd(self, module, imp=None):
-        if imp is None:
-            imp = self.import_module
-        return _import_from_cwd(module, imp)
+    def import_from_cwd(self, module, imp=None, package=None):
+        return _import_from_cwd(module,
+                self.import_module if imp is None else imp,
+                package=package)
 
     def import_default_modules(self):
-        imports = self.conf.get("CELERY_IMPORTS") or []
-        imports = set(list(imports) + BUILTIN_MODULES)
-        return map(self.import_task_module, imports)
+        imports = set(maybe_list(self.conf.get("CELERY_IMPORTS") or ()))
+        return [self.import_task_module(module)
+                    for module in imports | self.builtin_modules]
 
     def init_worker(self):
         if not self.worker_initialized:
             self.worker_initialized = True
             self.on_worker_init()
 
+    def init_worker_process(self):
+        self.on_worker_process_init()
+
     def config_from_envvar(self, variable_name, silent=False):
         module_name = os.environ.get(variable_name)
         if not module_name:
             if silent:
                 return False
-            raise ImproperlyConfigured(ERROR_ENVVAR_NOT_SET % (module_name, ))
+            raise ImproperlyConfigured(self.error_envvar_not_set % module_name)
         return self.config_from_object(module_name, silent=silent)
 
     def config_from_object(self, obj, silent=False):
         if isinstance(obj, basestring):
             try:
-                obj = get_cls_by_name(obj, imp=self.import_from_cwd)
+                if "." in obj:
+                    obj = get_cls_by_name(obj, imp=self.import_from_cwd)
+                else:
+                    obj = self.import_from_cwd(obj)
             except (ImportError, AttributeError):
                 if silent:
                     return False
@@ -106,7 +140,7 @@ class BaseLoader(object):
                 override_types={"tuple": "json",
                                 "list": "json",
                                 "dict": "json"}):
-        from celery.app.defaults import Option, NAMESPACES
+        from ..app.defaults import Option, NAMESPACES
         namespace = namespace.upper()
         typemap = dict(Option.typemap, **extra_types)
 
@@ -148,20 +182,24 @@ class BaseLoader(object):
 
     def mail_admins(self, subject, body, fail_silently=False,
             sender=None, to=None, host=None, port=None,
-            user=None, password=None, timeout=None):
+            user=None, password=None, timeout=None,
+            use_ssl=False, use_tls=False):
         try:
             message = self.mail.Message(sender=sender, to=to,
-                                        subject=subject, body=body)
+                                        subject=safe_str(subject),
+                                        body=safe_str(body))
             mailer = self.mail.Mailer(host=host, port=port,
                                       user=user, password=password,
-                                      timeout=timeout)
+                                      timeout=timeout, use_ssl=use_ssl,
+                                      use_tls=use_tls)
             mailer.send(message)
         except Exception, exc:
             if not fail_silently:
                 raise
             warnings.warn(self.mail.SendmailWarning(
-                "Mail could not be sent: %r %r" % (
-                    exc, {"To": to, "Subject": subject})))
+                "Mail could not be sent: %r %r\n%r" % (
+                    exc, {"To": to, "Subject": subject},
+                    traceback.format_stack())))
 
     @property
     def conf(self):
@@ -172,5 +210,4 @@ class BaseLoader(object):
 
     @cached_property
     def mail(self):
-        from celery.utils import mail
-        return mail
+        return self.import_module("celery.utils.mail")

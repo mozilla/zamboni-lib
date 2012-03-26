@@ -1,30 +1,66 @@
+# -*- coding: utf-8 -*-
 """
-celery.app
-==========
+    celery.app
+    ~~~~~~~~~~
 
-Celery Application.
+    Celery Application.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
-:license: BSD, see LICENSE for more details.
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
 
 """
+
+from __future__ import absolute_import
+
 import os
 import threading
 
-from inspect import getargspec
+from .. import registry
+from ..utils import cached_property, instantiate
 
-from kombu.utils import cached_property
+from . import annotations
+from . import base
 
-from celery import registry
-from celery.app import base
-from celery.utils import instantiate
-from celery.utils.functional import wraps
 
-# Apps with the :attr:`~celery.app.base.BaseApp.set_as_current` attribute
-# sets this, so it will always contain the last instantiated app,
-# and is the default app returned by :func:`app_or_default`.
-_tls = threading.local()
-_tls.current_app = None
+class _TLS(threading.local):
+    #: Apps with the :attr:`~celery.app.base.BaseApp.set_as_current` attribute
+    #: sets this, so it will always contain the last instantiated app,
+    #: and is the default app returned by :func:`app_or_default`.
+    current_app = None
+
+    #: The currently executing task.
+    current_task = None
+_tls = _TLS()
+
+
+class AppPickler(object):
+    """Default application pickler/unpickler."""
+
+    def __call__(self, cls, *args):
+        kwargs = self.build_kwargs(*args)
+        app = self.construct(cls, **kwargs)
+        self.prepare(app, **kwargs)
+        return app
+
+    def prepare(self, app, **kwargs):
+        app.conf.update(kwargs["changes"])
+
+    def build_kwargs(self, *args):
+        return self.build_standard_kwargs(*args)
+
+    def build_standard_kwargs(self, main, changes, loader, backend, amqp,
+            events, log, control, accept_magic_kwargs):
+        return dict(main=main, loader=loader, backend=backend, amqp=amqp,
+                    changes=changes, events=events, log=log, control=control,
+                    set_as_current=False,
+                    accept_magic_kwargs=accept_magic_kwargs)
+
+    def construct(self, cls, **kwargs):
+        return cls(**kwargs)
+
+
+def _unpickle_app(cls, pickler, *args):
+    return pickler()(cls, *args)
 
 
 class App(base.BaseApp):
@@ -43,8 +79,10 @@ class App(base.BaseApp):
     :keyword set_as_current:  Make this the global current app.
 
     """
+    Pickler = AppPickler
 
     def set_current(self):
+        """Make this the current app for this thread."""
         _tls.current_app = self
 
     def on_init(self):
@@ -56,7 +94,7 @@ class App(base.BaseApp):
         taken from this app."""
         conf = self.conf
 
-        from celery.task.base import BaseTask
+        from .task import BaseTask
 
         class Task(BaseTask):
             abstract = True
@@ -80,76 +118,71 @@ class App(base.BaseApp):
 
     def Worker(self, **kwargs):
         """Create new :class:`~celery.apps.worker.Worker` instance."""
-        return instantiate("celery.apps.worker.Worker", app=self, **kwargs)
+        return instantiate("celery.apps.worker:Worker", app=self, **kwargs)
+
+    def WorkController(self, **kwargs):
+        return instantiate("celery.worker:WorkController", app=self, **kwargs)
 
     def Beat(self, **kwargs):
         """Create new :class:`~celery.apps.beat.Beat` instance."""
-        return instantiate("celery.apps.beat.Beat", app=self, **kwargs)
+        return instantiate("celery.apps.beat:Beat", app=self, **kwargs)
 
     def TaskSet(self, *args, **kwargs):
         """Create new :class:`~celery.task.sets.TaskSet`."""
-        from celery.task.sets import TaskSet
-        kwargs["app"] = self
-        return TaskSet(*args, **kwargs)
+        return instantiate("celery.task.sets:TaskSet",
+                           app=self, *args, **kwargs)
 
     def worker_main(self, argv=None):
         """Run :program:`celeryd` using `argv`.  Uses :data:`sys.argv`
         if `argv` is not specified."""
-        from celery.bin.celeryd import WorkerCommand
-        return WorkerCommand(app=self).execute_from_commandline(argv)
+        return instantiate("celery.bin.celeryd:WorkerCommand", app=self) \
+                    .execute_from_commandline(argv)
 
     def task(self, *args, **options):
         """Decorator to create a task class out of any callable.
 
-        .. admonition:: Examples
+        **Examples:**
 
-            .. code-block:: python
+        .. code-block:: python
 
-                @task()
-                def refresh_feed(url):
-                    return Feed.objects.get(url=url).refresh()
+            @task()
+            def refresh_feed(url):
+                return Feed.objects.get(url=url).refresh()
 
-            With setting extra options and using retry.
+        with setting extra options and using retry.
 
-            .. code-block:: python
+        .. code-block:: python
 
-                @task(exchange="feeds")
-                def refresh_feed(url, **kwargs):
-                    try:
-                        return Feed.objects.get(url=url).refresh()
-                    except socket.error, exc:
-                        refresh_feed.retry(args=[url], kwargs=kwargs, exc=exc)
+            from celery.task import current
 
-            Calling the resulting task:
+            @task(exchange="feeds")
+            def refresh_feed(url):
+                try:
+                return Feed.objects.get(url=url).refresh()
+            except socket.error, exc:
+                current.retry(exc=exc)
 
-                >>> refresh_feed("http://example.com/rss") # Regular
-                <Feed: http://example.com/rss>
-                >>> refresh_feed.delay("http://example.com/rss") # Async
-                <AsyncResult: 8998d0f4-da0b-4669-ba03-d5ab5ac6ad5d>
+        Calling the resulting task::
+
+            >>> refresh_feed("http://example.com/rss") # Regular
+            <Feed: http://example.com/rss>
+            >>> refresh_feed.delay("http://example.com/rss") # Async
+            <AsyncResult: 8998d0f4-da0b-4669-ba03-d5ab5ac6ad5d>
 
         """
 
         def inner_create_task_cls(**options):
 
             def _create_task_cls(fun):
-                options["app"] = self
-                options.setdefault("accept_magic_kwargs", False)
                 base = options.pop("base", None) or self.Task
 
-                @wraps(fun, assigned=("__module__", "__name__"))
-                def run(self, *args, **kwargs):
-                    return fun(*args, **kwargs)
-
-                # Save the argspec for this task so we can recognize
-                # which default task kwargs we're going to pass to it later.
-                # (this happens in celery.utils.fun_takes_kwargs)
-                run.argspec = getargspec(fun)
-
-                cls_dict = dict(options, run=run,
-                                __module__=fun.__module__,
-                                __doc__=fun.__doc__)
-                T = type(fun.__name__, (base, ), cls_dict)()
-                return registry.tasks[T.name]             # global instance.
+                T = type(fun.__name__, (base, ), dict({
+                        "app": self,
+                        "accept_magic_kwargs": False,
+                        "run": staticmethod(fun),
+                        "__doc__": fun.__doc__,
+                        "__module__": fun.__module__}, **options))()
+                return registry.tasks[T.name]  # global instance.
 
             return _create_task_cls
 
@@ -157,10 +190,23 @@ class App(base.BaseApp):
             return inner_create_task_cls(**options)(*args)
         return inner_create_task_cls(**options)
 
+    def annotate_task(self, task):
+        if self.annotations:
+            match = annotations._first_match(self.annotations, task)
+            for attr, value in (match or {}).iteritems():
+                setattr(task, attr, value)
+            match_any = annotations._first_match_any(self.annotations)
+            for attr, value in (match_any or {}).iteritems():
+                setattr(task, attr, value)
+
     @cached_property
     def Task(self):
         """Default Task base class for this application."""
         return self.create_task_cls()
+
+    @cached_property
+    def annotations(self):
+        return annotations.prepare(self.conf.CELERY_ANNOTATIONS)
 
     def __repr__(self):
         return "<Celery: %s:0x%x>" % (self.main or "__main__", id(self), )
@@ -169,26 +215,19 @@ class App(base.BaseApp):
         # Reduce only pickles the configuration changes,
         # so the default configuration doesn't have to be passed
         # between processes.
-        return (_unpickle_app, (self.__class__,
-                                self.main,
-                                self.conf.changes,
-                                self.loader_cls,
-                                self.backend_cls,
-                                self.amqp_cls,
-                                self.events_cls,
-                                self.log_cls,
-                                self.control_cls,
-                                self.accept_magic_kwargs))
+        return (_unpickle_app, (self.__class__, self.Pickler)
+                              + self.__reduce_args__())
 
-
-def _unpickle_app(cls, main, changes, loader, backend, amqp,
-        events, log, control, accept_magic_kwargs):
-    app = cls(main, loader=loader, backend=backend, amqp=amqp,
-                    events=events, log=log, control=control,
-                    set_as_current=False,
-                    accept_magic_kwargs=accept_magic_kwargs)
-    app.conf.update(changes)
-    return app
+    def __reduce_args__(self):
+        return (self.main,
+                self.conf.changes,
+                self.loader_cls,
+                self.backend_cls,
+                self.amqp_cls,
+                self.events_cls,
+                self.log_cls,
+                self.control_cls,
+                self.accept_magic_kwargs)
 
 
 #: The "default" loader is the default loader used by old applications.
@@ -196,11 +235,16 @@ default_loader = os.environ.get("CELERY_LOADER") or "default"
 
 #: Global fallback app instance.
 default_app = App("default", loader=default_loader,
-                  set_as_current=False, accept_magic_kwargs=True)
+                             set_as_current=False,
+                             accept_magic_kwargs=True)
 
 
 def current_app():
     return getattr(_tls, "current_app", None) or default_app
+
+
+def current_task():
+    return getattr(_tls, "current_task", None)
 
 
 def _app_or_default(app=None):
@@ -221,12 +265,12 @@ def _app_or_default_trace(app=None):  # pragma: no cover
     from multiprocessing import current_process
     if app is None:
         if getattr(_tls, "current_app", None):
-            print("-- RETURNING TO CURRENT APP --")
+            print("-- RETURNING TO CURRENT APP --")  # noqa+
             print_stack()
             return _tls.current_app
         if current_process()._name == "MainProcess":
             raise Exception("DEFAULT APP")
-        print("-- RETURNING TO DEFAULT APP --")
+        print("-- RETURNING TO DEFAULT APP --")      # noqa+
         print_stack()
         return default_app
     return app

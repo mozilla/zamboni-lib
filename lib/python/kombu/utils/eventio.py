@@ -1,16 +1,51 @@
+"""
+kombu.utils.eventio
+===================
+
+Evented IO support for multiple platforms.
+
+:copyright: (c) 2009 - 2012 by Ask Solem.
+:license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
+import errno
 import select
 import socket
 
-try:
-    from eventlet.patcher import is_monkey_patched as is_eventlet
-except ImportError:
-    is_eventlet = lambda module: False  # noqa
+from ..syn import detect_environment
+
+__all__ = ["poll"]
 
 POLL_READ = 0x001
 POLL_ERR = 0x008 | 0x010 | 0x2000
 
 
-class _epoll(object):
+def get_errno(exc):
+    try:
+        return exc.errno
+    except AttributeError:
+        try:
+            # e.args = (errno, reason)
+            if isinstance(exc.args, tuple) and len(exc.args) == 2:
+                return exc.args[0]
+        except AttributeError:
+            pass
+    return 0
+
+
+class Poller(object):
+
+    def poll(self, timeout):
+        try:
+            return self._poll(timeout)
+        except Exception, exc:
+            if get_errno(exc) != errno.EINTR:
+                raise
+
+
+class _epoll(Poller):
 
     def __init__(self):
         self._epoll = select.epoll()
@@ -24,11 +59,11 @@ class _epoll(object):
         except socket.error:
             pass
 
-    def poll(self, timeout):
-        return self._epoll.poll(timeout and timeout / 1000.0 or -1)
+    def _poll(self, timeout):
+        return self._epoll.poll(timeout or -1)
 
 
-class _kqueue(object):
+class _kqueue(Poller):
 
     def __init__(self):
         self._kqueue = select.kqueue()
@@ -49,9 +84,8 @@ class _kqueue(object):
         self._kqueue.control([select.kevent(fd, filter=select.KQ_FILTER_READ,
                                                 flags=flags)], 0)
 
-    def poll(self, timeout):
-        kevents = self._kqueue.control(None, 1000,
-                                      timeout and timeout / 1000.0 or timeout)
+    def _poll(self, timeout):
+        kevents = self._kqueue.control(None, 1000, timeout)
         events = {}
         for kevent in kevents:
             fd = kevent.ident
@@ -62,7 +96,7 @@ class _kqueue(object):
         return events.items()
 
 
-class _select(object):
+class _select(Poller):
 
     def __init__(self):
         self._all = self._rfd, self._efd = set(), set()
@@ -78,7 +112,7 @@ class _select(object):
         self._rfd.discard(fd)
         self._efd.discard(fd)
 
-    def poll(self, timeout):
+    def _poll(self, timeout):
         read, _write, error = select.select(self._rfd, [], self._efd, timeout)
         events = {}
         for fd in read:
@@ -89,14 +123,20 @@ class _select(object):
             events[fd] = events.get(fd, 0) | POLL_ERR
         return events.items()
 
-if is_eventlet(select):
-    # use Eventlet's non-blocking version of select.select
-    poll = _select
-elif hasattr(select, "epoll"):
-    # Py2.6+ Linux
-    poll = _epoll
-elif hasattr(select, "kqueue"):
-    # Py2.6+ on BSD / Darwin
-    poll = _kqueue
-else:
-    poll = _select
+
+def _get_poller():
+    if detect_environment() in ("eventlet", "gevent"):
+        # greenlet
+        return _select
+    elif hasattr(select, "epoll"):
+        # Py2.6+ Linux
+        return _epoll
+    elif hasattr(select, "kqueue"):
+        # Py2.6+ on BSD / Darwin
+        return _kqueue
+    else:
+        return _select
+
+
+def poll(*args, **kwargs):
+    return _get_poller()(*args, **kwargs)

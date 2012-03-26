@@ -1,22 +1,202 @@
+# -*- coding: utf-8 -*-
 """
-celery.datastructures
-=====================
+    celery.datastructures
+    ~~~~~~~~~~~~~~~~~~~~~
 
-Custom data structures.
+    Custom types and data structures.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
-:license: BSD, see LICENSE for more details.
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
 
 """
-from __future__ import generators
+from __future__ import absolute_import
+from __future__ import with_statement
 
+import sys
 import time
 import traceback
 
+from collections import defaultdict
 from itertools import chain
-from Queue import Empty
+from threading import RLock
 
-from celery.utils.compat import OrderedDict
+from kombu.utils.limits import TokenBucket  # noqa
+
+from .utils import uniq
+from .utils.compat import UserDict, OrderedDict
+
+
+class CycleError(Exception):
+    """A cycle was detected in an acyclic graph."""
+
+
+class DependencyGraph(object):
+    """A directed acyclic graph of objects and their dependencies.
+
+    Supports a robust topological sort
+    to detect the order in which they must be handled.
+
+    Takes an optional iterator of ``(obj, dependencies)``
+    tuples to build the graph from.
+
+    .. warning::
+
+        Does not support cycle detection.
+
+    """
+
+    def __init__(self, it=None):
+        self.adjacent = {}
+        if it is not None:
+            self.update(it)
+
+    def add_arc(self, obj):
+        """Add an object to the graph."""
+        self.adjacent[obj] = []
+
+    def add_edge(self, A, B):
+        """Add an edge from object ``A`` to object ``B``
+        (``A`` depends on ``B``)."""
+        self[A].append(B)
+
+    def topsort(self):
+        """Sort the graph topologically.
+
+        :returns: a list of objects in the order
+            in which they must be handled.
+
+        """
+        graph = DependencyGraph()
+        components = self._tarjan72()
+
+        NC = dict((node, component)
+                    for component in components
+                        for node in component)
+        for component in components:
+            graph.add_arc(component)
+        for node in self:
+            node_c = NC[node]
+            for successor in self[node]:
+                successor_c = NC[successor]
+                if node_c != successor_c:
+                    graph.add_edge(node_c, successor_c)
+        return [t[0] for t in graph._khan62()]
+
+    def valency_of(self, obj):
+        """Returns the velency (degree) of a vertex in the graph."""
+        l = [len(self[obj])]
+        for node in self[obj]:
+            l.append(self.valency_of(node))
+        return sum(l)
+
+    def update(self, it):
+        """Update the graph with data from a list
+        of ``(obj, dependencies)`` tuples."""
+        tups = list(it)
+        for obj, _ in tups:
+            self.add_arc(obj)
+        for obj, deps in tups:
+            for dep in deps:
+                self.add_edge(obj, dep)
+
+    def edges(self):
+        """Returns generator that yields for all edges in the graph."""
+        return (obj for obj, adj in self.iteritems() if adj)
+
+    def _khan62(self):
+        """Khans simple topological sort algorithm from '62
+
+        See http://en.wikipedia.org/wiki/Topological_sorting
+
+        """
+        count = defaultdict(lambda: 0)
+        result = []
+
+        for node in self:
+            for successor in self[node]:
+                count[successor] += 1
+        ready = [node for node in self if not count[node]]
+
+        while ready:
+            node = ready.pop()
+            result.append(node)
+
+            for successor in self[node]:
+                count[successor] -= 1
+                if count[successor] == 0:
+                    ready.append(successor)
+        result.reverse()
+        return result
+
+    def _tarjan72(self):
+        """Tarjan's algorithm to find strongly connected components.
+
+        See http://bit.ly/vIMv3h.
+
+        """
+        result, stack, low = [], [], {}
+
+        def visit(node):
+            if node in low:
+                return
+            num = len(low)
+            low[node] = num
+            stack_pos = len(stack)
+            stack.append(node)
+
+            for successor in self[node]:
+                visit(successor)
+                low[node] = min(low[node], low[successor])
+
+            if num == low[node]:
+                component = tuple(stack[stack_pos:])
+                stack[stack_pos:] = []
+                result.append(component)
+                for item in component:
+                    low[item] = len(self)
+
+        for node in self:
+            visit(node)
+
+        return result
+
+    def to_dot(self, fh, ws=" " * 4):
+        """Convert the graph to DOT format.
+
+        :param fh: A file, or a file-like object to write the graph to.
+
+        """
+        fh.write("digraph dependencies {\n")
+        for obj, adjacent in self.iteritems():
+            if not adjacent:
+                fh.write(ws + '"%s"\n' % (obj, ))
+            for req in adjacent:
+                fh.write(ws + '"%s" -> "%s"\n' % (obj, req))
+        fh.write("}\n")
+
+    def __iter__(self):
+        return self.adjacent.iterkeys()
+
+    def __getitem__(self, node):
+        return self.adjacent[node]
+
+    def __len__(self):
+        return len(self.adjacent)
+
+    def _iterate_items(self):
+        return self.adjacent.iteritems()
+    items = iteritems = _iterate_items
+
+    def __repr__(self):
+        return '\n'.join(self.repr_node(N) for N in self)
+
+    def repr_node(self, obj, level=1):
+        output = ["%s(%s)" % (obj, self.valency_of(obj))]
+        for other in self[obj]:
+            d = "%s(%s)" % (other, self.valency_of(other))
+            output.append('     ' * level + d)
+            output.extend(self.repr_node(other, level + 1).split('\n')[1:])
+        return '\n'.join(output)
 
 
 class AttributeDictMixin(object):
@@ -79,8 +259,16 @@ class DictAttribute(object):
     def __contains__(self, key):
         return hasattr(self.obj, key)
 
-    def iteritems(self):
+    def _iterate_items(self):
         return vars(self.obj).iteritems()
+    iteritems = _iterate_items
+
+    if sys.version_info >= (3, 0):  # pragma: no cover
+        items = _iterate_items
+    else:
+
+        def items(self):
+            return list(self._iterate_items())
 
 
 class ConfigurationView(AttributeDictMixin):
@@ -95,14 +283,14 @@ class ConfigurationView(AttributeDictMixin):
     """
     changes = None
     defaults = None
+    _order = None
 
     def __init__(self, changes, defaults):
-        self.__dict__["changes"] = changes
-        self.__dict__["defaults"] = defaults
-        self.__dict__["_order"] = [changes] + defaults
+        self.__dict__.update(changes=changes, defaults=defaults,
+                             _order=[changes] + defaults)
 
     def __getitem__(self, key):
-        for d in self.__dict__["_order"]:
+        for d in self._order:
             try:
                 return d[key]
             except KeyError:
@@ -110,7 +298,7 @@ class ConfigurationView(AttributeDictMixin):
         raise KeyError(key)
 
     def __setitem__(self, key, value):
-        self.__dict__["changes"][key] = value
+        self.changes[key] = value
 
     def get(self, key, default=None):
         try:
@@ -126,10 +314,10 @@ class ConfigurationView(AttributeDictMixin):
             return default
 
     def update(self, *args, **kwargs):
-        return self.__dict__["changes"].update(*args, **kwargs)
+        return self.changes.update(*args, **kwargs)
 
     def __contains__(self, key):
-        for d in self.__dict__["_order"]:
+        for d in self._order:
             if key in d:
                 return True
         return False
@@ -143,25 +331,91 @@ class ConfigurationView(AttributeDictMixin):
     def _iter(self, op):
         # defaults must be first in the stream, so values in
         # changes takes precedence.
-        return chain(*[op(d) for d in reversed(self.__dict__["_order"])])
+        return chain(*[op(d) for d in reversed(self._order)])
 
-    def iterkeys(self):
-        return self._iter(lambda d: d.iterkeys())
+    def _iterate_keys(self):
+        return uniq(self._iter(lambda d: d.iterkeys()))
+    iterkeys = _iterate_keys
 
-    def iteritems(self):
-        return self._iter(lambda d: d.iteritems())
+    def _iterate_items(self):
+        return ((key, self[key]) for key in self)
+    iteritems = _iterate_items
 
-    def itervalues(self):
-        return self._iter(lambda d: d.itervalues())
+    def _iterate_values(self):
+        return (self[key] for key in self)
+    itervalues = _iterate_values
 
     def keys(self):
-        return list(self.iterkeys())
+        return list(self._iterate_keys())
 
     def items(self):
-        return list(self.iteritems())
+        return list(self._iterate_items())
 
     def values(self):
-        return list(self.itervalues())
+        return list(self._iterate_values())
+
+
+class _Code(object):
+
+    def __init__(self, code):
+        self.co_filename = code.co_filename
+        self.co_name = code.co_name
+
+
+class _Frame(object):
+    Code = _Code
+
+    def __init__(self, frame):
+        self.f_globals = {
+            "__file__": frame.f_globals.get("__file__", "__main__"),
+            "__name__": frame.f_globals.get("__name__"),
+            "__loader__": frame.f_globals.get("__loader__"),
+        }
+        self.f_locals = fl = {}
+        try:
+            fl["__traceback_hide__"] = frame.f_locals["__traceback_hide__"]
+        except KeyError:
+            pass
+        self.f_code = self.Code(frame.f_code)
+        self.f_lineno = frame.f_lineno
+
+
+class _Object(object):
+
+    def __init__(self, **kw):
+        [setattr(self, k, v) for k, v in kw.iteritems()]
+
+
+class _Truncated(object):
+
+    def __init__(self):
+        self.tb_lineno = -1
+        self.tb_frame = _Object(
+                f_globals={"__file__": "",
+                           "__name__": "",
+                           "__loader__": None},
+                f_fileno=None,
+                f_code=_Object(co_filename="...",
+                               co_name="[rest of traceback truncated]"),
+        )
+        self.tb_next = None
+
+
+class Traceback(object):
+    Frame = _Frame
+
+    tb_frame = tb_lineno = tb_next = None
+    max_frames = sys.getrecursionlimit() / 8
+
+    def __init__(self, tb, max_frames=None, depth=0):
+        limit = self.max_frames = max_frames or self.max_frames
+        self.tb_frame = self.Frame(tb.tb_frame)
+        self.tb_lineno = tb.tb_lineno
+        if tb.tb_next is not None:
+            if depth <= limit:
+                self.tb_next = Traceback(tb.tb_next, limit, depth + 1)
+            else:
+                self.tb_next = _Truncated()
 
 
 class ExceptionInfo(object):
@@ -172,16 +426,26 @@ class ExceptionInfo(object):
 
     """
 
-    #: The original exception.
+    #: Exception type.
+    type = None
+
+    #: Exception instance.
     exception = None
 
-    #: A traceback form the point when :attr:`exception` was raised.
+    #: Pickleable traceback instance for use with :mod:`traceback`
+    tb = None
+
+    #: String representation of the traceback.
     traceback = None
 
-    def __init__(self, exc_info):
-        _, exception, _ = exc_info
-        self.exception = exception
+    #: Set to true if this is an internal error.
+    internal = False
+
+    def __init__(self, exc_info, internal=False):
+        self.type, self.exception, tb = exc_info
+        self.tb = Traceback(tb)
         self.traceback = ''.join(traceback.format_exception(*exc_info))
+        self.internal = internal
 
     def __str__(self):
         return self.traceback
@@ -189,28 +453,9 @@ class ExceptionInfo(object):
     def __repr__(self):
         return "<ExceptionInfo: %r>" % (self.exception, )
 
-
-def consume_queue(queue):
-    """Iterator yielding all immediately available items in a
-    :class:`Queue.Queue`.
-
-    The iterator stops as soon as the queue raises :exc:`Queue.Empty`.
-
-    *Examples*
-
-        >>> q = Queue()
-        >>> map(q.put, range(4))
-        >>> list(consume_queue(q))
-        [0, 1, 2, 3]
-        >>> list(consume_queue(q))
-        []
-
-    """
-    while 1:
-        try:
-            yield queue.get_nowait()
-        except Empty:
-            break
+    @property
+    def exc_info(self):
+        return self.type, self.exception, self.tb
 
 
 class LimitedSet(object):
@@ -225,6 +470,7 @@ class LimitedSet(object):
     :keyword expires: Time in seconds, before a membership expires.
 
     """
+    __slots__ = ("maxlen", "expires", "_data")
 
     def __init__(self, maxlen=None, expires=None):
         self.maxlen = maxlen
@@ -263,7 +509,8 @@ class LimitedSet(object):
         if isinstance(other, self.__class__):
             self._data.update(other._data)
         else:
-            self._data.update(other)
+            for obj in other:
+                self.add(obj)
 
     def as_dict(self):
         return self._data
@@ -287,76 +534,66 @@ class LimitedSet(object):
         return self.chronologically[0]
 
 
-class LocalCache(OrderedDict):
-    """Dictionary with a finite number of keys.
+class LRUCache(UserDict):
+    """LRU Cache implementation using a doubly linked list to track access.
 
-    Older items expires first.
+    :keyword limit: The maximum number of keys to keep in the cache.
+        When a new key is inserted and the limit has been exceeded,
+        the *Least Recently Used* key will be discarded from the
+        cache.
 
     """
 
     def __init__(self, limit=None):
-        super(LocalCache, self).__init__()
         self.limit = limit
+        self.mutex = RLock()
+        self.data = OrderedDict()
+
+    def __getitem__(self, key):
+        with self.mutex:
+            value = self[key] = self.data.pop(key)
+        return value
+
+    def keys(self):
+        # userdict.keys in py3k calls __getitem__
+        return self.data.keys()
+
+    def values(self):
+        return list(self._iterate_values())
+
+    def items(self):
+        return list(self._iterate_items())
 
     def __setitem__(self, key, value):
-        while len(self) >= self.limit:
-            self.popitem(last=False)
-        super(LocalCache, self).__setitem__(key, value)
+        # remove least recently used key.
+        with self.mutex:
+            if self.limit and len(self.data) >= self.limit:
+                self.data.pop(iter(self.data).next())
+            self.data[key] = value
 
+    def __iter__(self):
+        return self.data.iterkeys()
 
-class TokenBucket(object):
-    """Token Bucket Algorithm.
+    def _iterate_items(self):
+        for k in self:
+            try:
+                yield (k, self.data[k])
+            except KeyError:
+                pass
+    iteritems = _iterate_items
 
-    See http://en.wikipedia.org/wiki/Token_Bucket
-    Most of this code was stolen from an entry in the ASPN Python Cookbook:
-    http://code.activestate.com/recipes/511490/
+    def _iterate_values(self):
+        for k in self:
+            try:
+                yield self.data[k]
+            except KeyError:  # pragma: no cover
+                pass
+    itervalues = _iterate_values
 
-    .. admonition:: Thread safety
-
-        This implementation may not be thread safe.
-
-    """
-
-    #: The rate in tokens/second that the bucket will be refilled
-    fill_rate = None
-
-    #: Maximum number of tokensin the bucket.
-    capacity = 1
-
-    #: Timestamp of the last time a token was taken out of the bucket.
-    timestamp = None
-
-    def __init__(self, fill_rate, capacity=1):
-        self.capacity = float(capacity)
-        self._tokens = capacity
-        self.fill_rate = float(fill_rate)
-        self.timestamp = time.time()
-
-    def can_consume(self, tokens=1):
-        """Returns :const:`True` if `tokens` number of tokens can be consumed
-        from the bucket."""
-        if tokens <= self._get_tokens():
-            self._tokens -= tokens
-            return True
-        return False
-
-    def expected_time(self, tokens=1):
-        """Returns the expected time in seconds when a new token should be
-        available.
-
-        .. admonition:: Warning
-
-            This consumes a token from the bucket.
-
-        """
-        _tokens = self._get_tokens()
-        tokens = max(tokens, _tokens)
-        return (tokens - _tokens) / self.fill_rate
-
-    def _get_tokens(self):
-        if self._tokens < self.capacity:
-            now = time.time()
-            delta = self.fill_rate * (now - self.timestamp)
-            self._tokens = min(self.capacity, self._tokens + delta)
-            self.timestamp = now
-        return self._tokens
+    def incr(self, key, delta=1):
+        with self.mutex:
+            # this acts as memcached does- store as a string, but return a
+            # integer as long as it exists and we can cast it
+            newval = int(self.data.pop(key)) + delta
+            self[key] = str(newval)
+        return newval

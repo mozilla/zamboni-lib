@@ -6,63 +6,27 @@ Carrot compatible interface for :class:`Publisher` and :class:`Producer`.
 
 See http://packages.python.org/pypi/carrot for documentation.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 from itertools import count
 
-from kombu import entity
-from kombu import messaging
+from . import entity
+from . import messaging
+from .common import entry_to_queue
+
+__all__ = ["Publisher", "Consumer"]
 
 
 def _iterconsume(connection, consumer, no_ack=False, limit=None):
     consumer.consume(no_ack=no_ack)
-    for iteration in count(0):
+    for iteration in count(0):  # for infinity
         if limit and iteration >= limit:
             raise StopIteration
         yield connection.drain_events()
-
-
-def entry_to_queue(queue, **options):
-    binding_key = options.get("binding_key") or options.get("routing_key")
-
-    e_durable = options.get("exchange_durable")
-    if e_durable is None:
-        e_durable = options.get("durable")
-
-    e_auto_delete = options.get("exchange_auto_delete")
-    if e_auto_delete is None:
-        e_auto_delete = options.get("auto_delete")
-
-    q_durable = options.get("queue_durable")
-    if q_durable is None:
-        q_durable = options.get("durable")
-
-    q_auto_delete = options.get("queue_auto_delete")
-    if q_auto_delete is None:
-        q_auto_delete = options.get("auto_delete")
-
-    e_arguments = options.get("exchange_arguments")
-    q_arguments = options.get("queue_arguments")
-    b_arguments = options.get("binding_arguments")
-
-    exchange = entity.Exchange(options.get("exchange"),
-                               type=options.get("exchange_type"),
-                               delivery_mode=options.get("delivery_mode"),
-                               routing_key=options.get("routing_key"),
-                               durable=e_durable,
-                               auto_delete=e_auto_delete,
-                               arguments=e_arguments)
-
-    return entity.Queue(queue,
-                        exchange=exchange,
-                        routing_key=binding_key,
-                        durable=q_durable,
-                        exclusive=options.get("exclusive"),
-                        auto_delete=q_auto_delete,
-                        queue_arguments=q_arguments,
-                        binding_arguments=b_arguments)
 
 
 class Publisher(messaging.Producer):
@@ -74,9 +38,10 @@ class Publisher(messaging.Producer):
     _closed = False
 
     def __init__(self, connection, exchange=None, routing_key=None,
-            exchange_type=None, durable=None, auto_delete=None, **kwargs):
-        self.connection = connection
-        self.backend = connection.channel()
+                exchange_type=None, durable=None, auto_delete=None,
+                channel=None, **kwargs):
+        if channel:
+            connection = channel
 
         self.exchange = exchange or self.exchange
         self.exchange_type = exchange_type or self.exchange_type
@@ -93,19 +58,13 @@ class Publisher(messaging.Producer):
                                             routing_key=self.routing_key,
                                             auto_delete=self.auto_delete,
                                             durable=self.durable)
-
-        super(Publisher, self).__init__(self.backend, self.exchange,
-                **kwargs)
+        super(Publisher, self).__init__(connection, self.exchange, **kwargs)
 
     def send(self, *args, **kwargs):
         return self.publish(*args, **kwargs)
 
-    def revive(self, channel):
-        self.backend = channel
-        super(Publisher, self).revive(channel)
-
     def close(self):
-        self.backend.close()
+        super(Publisher, self).close()
         self._closed = True
 
     def __enter__(self):
@@ -113,6 +72,10 @@ class Publisher(messaging.Producer):
 
     def __exit__(self, *exc_info):
         self.close()
+
+    @property
+    def backend(self):
+        return self.channel
 
 
 class Consumer(messaging.Consumer):
@@ -129,7 +92,6 @@ class Consumer(messaging.Consumer):
     def __init__(self, connection, queue=None, exchange=None,
             routing_key=None, exchange_type=None, durable=None,
             exclusive=None, auto_delete=None, **kwargs):
-        self.connection = connection
         self.backend = connection.channel()
 
         if durable is not None:
@@ -201,7 +163,7 @@ class Consumer(messaging.Consumer):
         return list(it)
 
     def iterqueue(self, limit=None, infinite=False):
-        for items_since_start in count():
+        for items_since_start in count():  # for infinity
             item = self.fetch()
             if (not infinite and item is None) or \
                     (limit and items_since_start >= limit):
@@ -211,9 +173,7 @@ class Consumer(messaging.Consumer):
 
 class ConsumerSet(messaging.Consumer):
 
-    def __init__(self, connection, from_dict=None, consumers=None,
-            callbacks=None, **kwargs):
-        self.connection = connection
+    def __init__(self, connection, from_dict=None, consumers=None, **kwargs):
         self.backend = connection.channel()
 
         queues = []
@@ -233,13 +193,11 @@ class ConsumerSet(messaging.Consumer):
         return self.purge()
 
     def add_consumer_from_dict(self, queue, **options):
-        queue = entry_to_queue(queue, **options)
-        self.queues.append(queue(self.channel))
-        return queue
+        return self.add_queue(entry_to_queue(queue, **options))
 
     def add_consumer(self, consumer):
         for queue in consumer.queues:
-            self.queues.append(queue(self.channel))
+            self.add_queue(queue)
 
     def revive(self, channel):
         self.backend = channel

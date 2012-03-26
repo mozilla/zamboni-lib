@@ -4,17 +4,20 @@ kombu.entity
 
 Exchange and Queue declarations.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
-from kombu.abstract import MaybeChannelBound
-from kombu.syn import blocking as _SYN
+from __future__ import absolute_import
+
+from .abstract import MaybeChannelBound
 
 TRANSIENT_DELIVERY_MODE = 1
 PERSISTENT_DELIVERY_MODE = 2
 DELIVERY_MODES = {"transient": TRANSIENT_DELIVERY_MODE,
                   "persistent": PERSISTENT_DELIVERY_MODE}
+
+__all__ = ["Exchange", "Queue"]
 
 
 class Exchange(MaybeChannelBound):
@@ -134,6 +137,9 @@ class Exchange(MaybeChannelBound):
         self.type = type or self.type
         self.maybe_bind(channel)
 
+    def __hash__(self):
+        return hash("E|%s" % (self.name, ))
+
     def declare(self, nowait=False):
         """Declare the exchange.
 
@@ -143,12 +149,12 @@ class Exchange(MaybeChannelBound):
             response will not be waited for. Default is :const:`False`.
 
         """
-        return _SYN(self.channel.exchange_declare, exchange=self.name,
-                                                type=self.type,
-                                                durable=self.durable,
-                                                auto_delete=self.auto_delete,
-                                                arguments=self.arguments,
-                                                nowait=nowait)
+        return self.channel.exchange_declare(exchange=self.name,
+                                             type=self.type,
+                                             durable=self.durable,
+                                             auto_delete=self.auto_delete,
+                                             arguments=self.arguments,
+                                             nowait=nowait)
 
     def Message(self, body, delivery_mode=None, priority=None,
             content_type=None, content_encoding=None, properties=None,
@@ -179,7 +185,7 @@ class Exchange(MaybeChannelBound):
         :keyword headers: Message headers.
 
         """
-        properties = properties or {}
+        properties = {} if properties is None else properties
         delivery_mode = delivery_mode or self.delivery_mode
         properties["delivery_mode"] = DELIVERY_MODES.get(delivery_mode,
                                                          delivery_mode)
@@ -217,9 +223,9 @@ class Exchange(MaybeChannelBound):
             response will not be waited for. Default is :const:`False`.
 
         """
-        return _SYN(self.channel.exchange_delete, exchange=self.name,
-                                                  if_unused=if_unused,
-                                                  nowait=nowait)
+        return self.channel.exchange_delete(exchange=self.name,
+                                            if_unused=if_unused,
+                                            nowait=nowait)
 
     def __eq__(self, other):
         if isinstance(other, Exchange):
@@ -234,6 +240,10 @@ class Exchange(MaybeChannelBound):
     def __repr__(self):
         return super(Exchange, self).__repr__("Exchange %s(%s)" % (self.name,
                                                                    self.type))
+
+    @property
+    def can_cache_declaration(self):
+        return self.durable
 
 
 class Queue(MaybeChannelBound):
@@ -323,14 +333,21 @@ class Queue(MaybeChannelBound):
 
         Additional arguments used when binding the queue.
 
+    .. attribute:: alias
+
+        Unused in Kombu, but applications can take advantage of this.
+        For example to give alternate names to queues with automatically
+        generated queue names.
+
     """
     name = ""
-    exchange = None
+    exchange = Exchange("")
     routing_key = ""
 
     durable = True
     exclusive = False
     auto_delete = False
+    no_ack = False
 
     attrs = (("name", None),
              ("exchange", None),
@@ -339,7 +356,9 @@ class Queue(MaybeChannelBound):
              ("binding_arguments", None),
              ("durable", bool),
              ("exclusive", bool),
-             ("auto_delete", bool))
+             ("auto_delete", bool),
+             ("no_ack", None),
+             ("alias", None))
 
     def __init__(self, name="", exchange=None, routing_key="", channel=None,
             **kwargs):
@@ -352,15 +371,24 @@ class Queue(MaybeChannelBound):
             self.auto_delete = True
         self.maybe_bind(channel)
 
+    def __hash__(self):
+        return hash("Q|%s" % (self.name, ))
+
     def when_bound(self):
-        self.exchange = self.exchange(self.channel)
+        if self.exchange:
+            self.exchange = self.exchange(self.channel)
 
     def declare(self, nowait=False):
         """Declares the queue, the exchange and binds the queue to
         the exchange."""
-        return (self.name and self.exchange.declare(nowait),
-                self.name and self.queue_declare(nowait, passive=False),
-                self.name and self.queue_bind(nowait))
+        name = self.name
+        if name:
+            if self.exchange:
+                self.exchange.declare(nowait)
+        self.queue_declare(nowait, passive=False)
+        if name:
+            self.queue_bind(nowait)
+        return self.name
 
     def queue_declare(self, nowait=False, passive=False):
         """Declare queue on the server.
@@ -371,25 +399,24 @@ class Queue(MaybeChannelBound):
             without modifying the server state.
 
         """
-        return _SYN(self.channel.queue_declare, queue=self.name,
-                                                passive=passive,
-                                                durable=self.durable,
-                                                exclusive=self.exclusive,
-                                                auto_delete=self.auto_delete,
-                                                arguments=self.queue_arguments,
-                                                nowait=nowait)
+        ret = self.channel.queue_declare(queue=self.name,
+                                         passive=passive,
+                                         durable=self.durable,
+                                         exclusive=self.exclusive,
+                                         auto_delete=self.auto_delete,
+                                         arguments=self.queue_arguments,
+                                         nowait=nowait)
+        if not self.name:
+            self.name = ret[0]
+        return ret
 
     def queue_bind(self, nowait=False):
-        """Create the queue binding on the server.
-
-        :keyword nowait: Do not wait for a reply.
-
-        """
-        return _SYN(self.channel.queue_bind, queue=self.name,
-                                             exchange=self.exchange.name,
-                                             routing_key=self.routing_key,
-                                             arguments=self.binding_arguments,
-                                             nowait=nowait)
+        """Create the queue binding on the server."""
+        return self.channel.queue_bind(queue=self.name,
+                                       exchange=self.exchange.name,
+                                       routing_key=self.routing_key,
+                                       arguments=self.binding_arguments,
+                                       nowait=nowait)
 
     def get(self, no_ack=None):
         """Poll the server for a new message.
@@ -406,14 +433,18 @@ class Queue(MaybeChannelBound):
         is more important than performance.
 
         """
-        message = _SYN(self.channel.basic_get, queue=self.name, no_ack=no_ack)
+        no_ack = self.no_ack if no_ack is None else no_ack
+        message = self.channel.basic_get(queue=self.name, no_ack=no_ack)
         if message is not None:
-            return self.channel.message_to_python(message)
+            m2p = getattr(self.channel, "message_to_python", None)
+            if m2p:
+                message = m2p(message)
+            return message
 
     def purge(self, nowait=False):
-        """Remove all messages from the queue."""
-        return _SYN(self.channel.queue_purge, queue=self.name,
-                                              nowait=nowait) or 0
+        """Remove all ready messages from the queue."""
+        return self.channel.queue_purge(queue=self.name,
+                                        nowait=nowait) or 0
 
     def consume(self, consumer_tag='', callback=None, no_ack=None,
             nowait=False):
@@ -435,6 +466,8 @@ class Queue(MaybeChannelBound):
         :keyword callback: callback called for each delivered message
 
         """
+        if no_ack is None:
+            no_ack = self.no_ack
         return self.channel.basic_consume(queue=self.name,
                                           no_ack=no_ack,
                                           consumer_tag=consumer_tag or '',
@@ -453,22 +486,22 @@ class Queue(MaybeChannelBound):
             if the queue has consumers.
 
         :keyword if_empty: If set, the server will only delete the queue
-            if it is empty. If if's not empty a channel error will be raised.
+            if it is empty. If it is not empty a channel error will be raised.
 
         :keyword nowait: Do not wait for a reply.
 
         """
-        return _SYN(self.channel.queue_delete, queue=self.name,
-                                               if_unused=if_unused,
-                                               if_empty=if_empty,
-                                               nowait=nowait)
+        return self.channel.queue_delete(queue=self.name,
+                                         if_unused=if_unused,
+                                         if_empty=if_empty,
+                                         nowait=nowait)
 
     def unbind(self):
         """Delete the binding on the server."""
-        return _SYN(self.channel.queue_unbind, queue=self.name,
-                                            exchange=self.exchange.name,
-                                            routing_key=self.routing_key,
-                                            arguments=self.binding_arguments)
+        return self.channel.queue_unbind(queue=self.name,
+                                         exchange=self.exchange.name,
+                                         routing_key=self.routing_key,
+                                         arguments=self.binding_arguments)
 
     def __eq__(self, other):
         if isinstance(other, Queue):
@@ -487,3 +520,7 @@ class Queue(MaybeChannelBound):
                  "Queue %s -> %s -> %s" % (self.name,
                                            self.exchange,
                                            self.routing_key))
+
+    @property
+    def can_cache_declaration(self):
+        return self.durable

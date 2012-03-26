@@ -1,32 +1,30 @@
-from kombu.tests.utils import unittest
+from __future__ import absolute_import
+from __future__ import with_statement
+
+from mock import patch
 
 from kombu import transport
 
-from kombu.tests.utils import mask_modules, module_exists
+from .utils import TestCase
 
 
-class test_transport(unittest.TestCase):
-
-    def test_django_transport(self):
-        self.assertRaises(
-            ImportError,
-            mask_modules("djkombu")(transport.resolve_transport), "django")
-
-        self.assertTupleEqual(
-            module_exists("djkombu")(transport.resolve_transport)("django"),
-            ("djkombu.transport", "DatabaseTransport"))
-
-    def test_sqlalchemy_transport(self):
-        self.assertRaises(
-            ImportError,
-            mask_modules("sqlakombu")(transport.resolve_transport),
-            "sqlalchemy")
-
-        self.assertTupleEqual(
-            module_exists("sqlakombu")(transport.resolve_transport)(
-                "sqlalchemy"),
-            ("sqlakombu.transport", "Transport"))
+class test_transport(TestCase):
 
     def test_resolve_transport__no_class_name(self):
-        self.assertRaises(KeyError, transport.resolve_transport,
-                          "nonexistant")
+        with self.assertRaises(KeyError):
+            transport.resolve_transport("nonexistant")
+
+    def test_resolve_transport_when_callable(self):
+        self.assertTupleEqual(transport.resolve_transport(
+                lambda: "kombu.transport.memory.Transport"),
+                ("kombu.transport.memory", "Transport"))
+
+
+class test_transport_gettoq(TestCase):
+
+    @patch("warnings.warn")
+    def test_compat(self, warn):
+        x = transport._ghettoq("Redis", "redis", "redis")
+
+        self.assertEqual(x(), "kombu.transport.redis.Transport")
+        self.assertTrue(warn.called)

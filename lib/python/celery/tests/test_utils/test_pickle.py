@@ -1,6 +1,7 @@
-from celery.tests.utils import unittest
+from __future__ import absolute_import
 
 from celery.utils.serialization import pickle
+from celery.tests.utils import Case
 
 
 class RegularException(Exception):
@@ -14,7 +15,7 @@ class ArgOverrideException(Exception):
         Exception.__init__(self, message, status_code)
 
 
-class TestPickle(unittest.TestCase):
+class TestPickle(Case):
 
     def test_pickle_regular_exception(self):
         exc = None

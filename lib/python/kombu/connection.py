@@ -4,23 +4,35 @@ kombu.connection
 
 Broker connection and pools.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import os
 import sys
 import socket
 
+from contextlib import contextmanager
 from copy import copy
+from functools import wraps
 from itertools import count
 from Queue import Empty
+from urllib import unquote
+from urlparse import urlparse
+try:
+    from urlparse import parse_qsl
+except ImportError:  # pragma: no cover
+    from cgi import parse_qsl  # noqa
 
+# jython breaks on relative import for .exceptions for some reason
+# (Issue #112)
 from kombu import exceptions
-from kombu.transport import get_transport_cls
-from kombu.utils import retry_over_time
-from kombu.utils.compat import OrderedDict, LifoQueue as _LifoQueue
-from kombu.utils.functional import wraps
+from .transport import get_transport_cls
+from .utils import kwdict, retry_over_time
+from .utils.compat import OrderedDict, LifoQueue as _LifoQueue
 
 _LOG_CONNECTION = os.environ.get("KOMBU_LOG_CONNECTION", False)
 _LOG_CHANNEL = os.environ.get("KOMBU_LOG_CHANNEL", False)
@@ -28,49 +40,78 @@ _LOG_CHANNEL = os.environ.get("KOMBU_LOG_CHANNEL", False)
 
 #: Connection info -> URI
 URI_FORMAT = """\
-%(transport)s://%(userid)s@%(hostname)s%(port)s%(virtual_host)s\
+%(transport)s://%(userid)s@%(hostname)s%(port)s/%(virtual_host)s\
 """
+
+__all__ = ["parse_url", "BrokerConnection", "Resource",
+           "ConnectionPool", "ChannelPool"]
+
+
+def parse_url(url):
+    port = path = auth = userid = password = None
+    # parse with HTTP URL semantics
+    scheme = urlparse(url).scheme
+    parts = urlparse(url.replace("%s://" % (scheme, ), "http://"))
+
+    # The first pymongo.Connection() argument (host) can be
+    # a mongodb connection URI. If this is the case, don't
+    # use port but let pymongo get the port(s) from the URI instead.
+    # This enables the use of replica sets and sharding.
+    # See pymongo.Connection() for more info.
+    if scheme == 'mongodb':
+        # strip the scheme since it is appended automatically.
+        hostname = url[len('mongodb://'):]
+    else:
+        netloc = parts.netloc
+        if '@' in netloc:
+            auth, _, netloc = parts.netloc.partition('@')
+            userid, _, password = auth.partition(':')
+        hostname, _, port = netloc.partition(':')
+        path = parts.path or ""
+        if path and path[0] == '/':
+            path = path[1:]
+        port = port and int(port) or port
+
+    return dict({"hostname": unquote(hostname or "") or None,
+                 "port": port or None,
+                 "userid": unquote(userid or "") or None,
+                 "password": unquote(password or "") or None,
+                 "transport": scheme,
+                 "virtual_host": unquote(path or "") or None},
+                **kwdict(dict(parse_qsl(parts.query))))
 
 
 class BrokerConnection(object):
     """A connection to the broker.
 
-    :keyword hostname: Hostname/address of the server to connect to.
-      Default is ``"localhost"``.
-    :keyword userid: Username. Default is ``"guest"``.
-    :keyword password: Password. Default is ``"guest"``.
-    :keyword virtual_host: Virtual host. Default is ``"/"``.
-    :keyword port: Port of the server. Default is transport specific.
-    :keyword insist: Insist on connecting to a server.
-      In a configuration with multiple load-sharing servers, the insist
-      option tells the server that the client is insisting on a connection
-      to the specified server.  Default is ``False``.
-    :keyword ssl: Use ssl to connect to the server. Default is ``False``.
-    :keyword transport: Transport class to use. Can be a class,
-         or a string specifying the path to the class. (e.g.
-         ``kombu.transport.pyamqplib.Transport``), or one of the aliases:
-         ``amqplib``, ``pika``, ``redis``, ``memory``.
+    :param URL:  Connection URL.
+
+    :keyword hostname: Default host name/address if not provided in the URL.
+    :keyword userid: Default user name if not provided in the URL.
+    :keyword password: Default password if not provided in the URL.
+    :keyword virtual_host: Default virtual host if not provided in the URL.
+    :keyword port: Default port if not provided in the URL.
+    :keyword ssl: Use SSL to connect to the server. Default is ``False``.
+      May not be supported by the specified transport.
+    :keyword transport: Default transport if not specified in the URL.
     :keyword connect_timeout: Timeout in seconds for connecting to the
-      server. May not be suported by the specified transport.
+      server. May not be supported by the specified transport.
     :keyword transport_options: A dict of additional connection arguments to
       pass to alternate kombu channel implementations.  Consult the transport
       documentation for available options.
+    :keyword insist: *Deprecated*
 
-    **Usage**
+    .. note::
 
-    Creating a connection::
+        The connection is established lazily when needed. If you need the
+        connection to be established, then force it to do so using
+        :meth:`connect`::
 
-        >>> conn = BrokerConnection("rabbit.example.com")
+            >>> conn.connect()
 
-    The connection is established lazily when needed. If you need the
-    connection to be established, then force it to do so using
-    :meth:`connect`::
+        Remember to always close the connection::
 
-        >>> conn.connect()
-
-    Remember to always close the connection::
-
-        >>> conn.release()
+            >>> conn.release()
 
     """
     URI_FORMAT = URI_FORMAT
@@ -81,13 +122,39 @@ class BrokerConnection(object):
 
     _closed = None
     _connection = None
+    _default_channel = None
     _transport = None
     _logger = None
+    skip_uri_transports = set(["sqlalchemy", "sqlakombu.transport.Transport"])
 
     def __init__(self, hostname="localhost", userid=None,
-            password=None, virtual_host="/", port=None, insist=False,
-            ssl=False, transport=None, connect_timeout=5, backend_cls=None,
+            password=None, virtual_host=None, port=None, insist=False,
+            ssl=False, transport=None, connect_timeout=5,
             transport_options=None, login_method=None, **kwargs):
+        # have to spell the args out, just to get nice docstrings :(
+        params = {"hostname": hostname, "userid": userid,
+                  "password": password, "virtual_host": virtual_host,
+                  "port": port, "insist": insist, "ssl": ssl,
+                  "transport": transport, "connect_timeout": connect_timeout,
+                  "login_method": login_method}
+        if hostname and "://" in hostname \
+                and transport not in self.skip_uri_transports:
+            params.update(parse_url(hostname))
+        self._init_params(**params)
+
+        # backend_cls argument will be removed shortly.
+        self.transport_cls = self.transport_cls or kwargs.get("backend_cls")
+
+        if transport_options is None:
+            transport_options = {}
+        self.transport_options = transport_options
+
+        if _LOG_CONNECTION:  # pragma: no cover
+            from .log import get_logger
+            self._logger = get_logger("kombu.connection")
+
+    def _init_params(self, hostname, userid, password, virtual_host, port,
+            insist, ssl, transport, connect_timeout, login_method):
         self.hostname = hostname
         self.userid = userid
         self.password = password
@@ -95,21 +162,12 @@ class BrokerConnection(object):
         self.virtual_host = virtual_host or self.virtual_host
         self.port = port or self.port
         self.insist = insist
-        self.connect_timeout = connect_timeout or self.connect_timeout
+        self.connect_timeout = connect_timeout
         self.ssl = ssl
-        # backend_cls argument will be removed shortly.
-        self.transport_cls = transport or backend_cls
-
-        if transport_options is None:
-            transport_options = {}
-        self.transport_options = transport_options
-
-        if _LOG_CONNECTION:
-            from kombu.utils.log import get_logger
-            self._logger = get_logger("kombu.connection")
+        self.transport_cls = transport
 
     def _debug(self, msg, ident="[Kombu connection:0x%(id)x] ", **kwargs):
-        if self._logger:
+        if self._logger:  # pragma: no cover
             self._logger.debug((ident + unicode(msg)) % {"id": id(self)},
                                **kwargs)
 
@@ -122,8 +180,8 @@ class BrokerConnection(object):
         """Request a new channel."""
         self._debug("create channel")
         chan = self.transport.create_channel(self.connection)
-        if _LOG_CHANNEL:
-            from kombu.utils.debug import Logwrapped
+        if _LOG_CHANNEL:  # pragma: no cover
+            from .utils.debug import Logwrapped
             return Logwrapped(chan, "kombu.channel",
                     "[Kombu channel:%(channel_id)s] ")
         return chan
@@ -132,19 +190,26 @@ class BrokerConnection(object):
         """Wait for a single event from the server.
 
         :keyword timeout: Timeout in seconds before we give up.
-            Raises :exc:`socket.timeout` if the timeout is execeded.
+            Raises :exc:`socket.timeout` if the timeout is exceeded.
 
         Usually used from an event loop.
 
         """
         return self.transport.drain_events(self.connection, **kwargs)
 
+    def maybe_close_channel(self, channel):
+        try:
+            channel.close()
+        except (self.connection_errors + self.channel_errors):
+            pass
+
     def _close(self):
+        if self._default_channel:
+            self.maybe_close_channel(self._default_channel)
         if self._connection:
             try:
                 self.transport.close_connection(self._connection)
-            except self.transport.connection_errors + (AttributeError,
-                                                       socket.error):
+            except self.connection_errors + (AttributeError, socket.error):
                 pass
             self._connection = None
             self._debug("closed")
@@ -184,10 +249,15 @@ class BrokerConnection(object):
                         interval_start, interval_step, interval_max)
         return self
 
+    def revive(self, new_channel):
+        if self._default_channel:
+            self.maybe_close_channel(self._default_channel)
+            self._default_channel = None
+
     def ensure(self, obj, fun, errback=None, max_retries=None,
-            interval_start=1, interval_step=1, interval_max=1):
+            interval_start=1, interval_step=1, interval_max=1, on_revive=None):
         """Ensure operation completes, regardless of any channel/connection
-        errors occuring.
+        errors occurring.
 
         Will retry by establishing the connection, and reapplying
         the function.
@@ -220,35 +290,79 @@ class BrokerConnection(object):
 
         """
 
-        max_retries = max_retries or 0
-
         @wraps(fun)
-        def _insured(*args, **kwargs):
+        def _ensured(*args, **kwargs):
             got_connection = 0
-            for retries in count(0):
+            for retries in count(0):  # for infinity
                 try:
                     return fun(*args, **kwargs)
                 except self.connection_errors + self.channel_errors, exc:
                     self._debug("ensure got exception: %r" % (exc, ),
                                 exc_info=sys.exc_info())
-                    if got_connection or \
-                            max_retries and retries > max_retries:
+                    if got_connection:
+                        raise
+                    if max_retries is not None and retries > max_retries:
                         raise
                     errback and errback(exc, 0)
                     self._connection = None
                     self.close()
-                    remaining_retries = max_retries and \
-                                            max(max_retries - retries, 1)
+                    remaining_retries = None
+                    if max_retries is not None:
+                        remaining_retries = max(max_retries - retries, 1)
                     self.ensure_connection(errback,
                                            remaining_retries,
                                            interval_start,
                                            interval_step,
                                            interval_max)
-                    obj.revive(self.channel())
+                    new_channel = self.channel()
+                    self.revive(new_channel)
+                    obj.revive(new_channel)
+                    if on_revive:
+                        on_revive(new_channel)
                     got_connection += 1
 
-        _insured.func_name = _insured.__name__ = "%s(insured)" % fun.__name__
-        return _insured
+        _ensured.func_name = _ensured.__name__ = "%s(ensured)" % fun.__name__
+        return _ensured
+
+    def autoretry(self, fun, channel=None, **ensure_options):
+        """Decorator for functions supporting a ``channel`` keyword argument.
+
+        The resulting callable will retry calling the function if
+        it raises connection or channel related errors.
+        The return value will be a tuple of ``(retval, last_created_channel)``.
+
+        If a ``channel`` is not provided, then one will be automatically
+        acquired (remember to close it afterwards).
+
+        See :meth:`ensure` for the full list of supported keyword arguments.
+
+        Example usage::
+
+            channel = connection.channel()
+            try:
+                ret, channel = connection.autoretry(publish_messages, channel)
+            finally:
+                channel.close()
+        """
+        channels = [channel]
+        create_channel = self.channel
+
+        class Revival(object):
+            __name__ = fun.__name__
+            __module__ = fun.__module__
+            __doc__ = fun.__doc__
+
+            def revive(self, channel):
+                channels[0] = channel
+
+            def __call__(self, *args, **kwargs):
+                if channels[0] is None:
+                    self.revive(create_channel())
+                kwargs["channel"] = channels[0]
+                return fun(*args, **kwargs), channels[0]
+
+        revive = Revival()
+        return self.ensure(revive, revive, **ensure_options)
 
     def create_transport(self):
         return self.get_transport_cls()(client=self)
@@ -268,31 +382,50 @@ class BrokerConnection(object):
 
     def info(self):
         """Get connection info."""
-        transport_cls = self.transport_cls or "amqplib"
-        port = self.port or self.transport.default_port
-        return OrderedDict((("hostname", self.hostname),
+        transport_cls = self.transport_cls or "amqp"
+        transport_cls = {"amqplib": "amqp"}.get(transport_cls, transport_cls)
+        defaults = self.transport.default_connection_params
+        info = OrderedDict((("hostname", self.hostname),
                             ("userid", self.userid),
                             ("password", self.password),
                             ("virtual_host", self.virtual_host),
-                            ("port", port),
+                            ("port", self.port),
                             ("insist", self.insist),
                             ("ssl", self.ssl),
                             ("transport", transport_cls),
+                            ("connect_timeout", self.connect_timeout),
                             ("transport_options", self.transport_options),
-                            ("connect_timeout", self.connect_timeout)))
+                            ("login_method", self.login_method)))
+        for key, value in defaults.iteritems():
+            if info[key] is None:
+                info[key] = value
+        return info
 
-    def __hash__(self):
+    def __eqhash__(self):
         return hash("|".join(map(str, self.info().itervalues())))
 
-    def as_uri(self):
+    def as_uri(self, include_password=False):
         fields = self.info()
         port = fields["port"]
-        if port:
-            fields["port"] = ":%s" % (port, )
-        vhost = fields["virtual_host"]
-        if not vhost.startswith('/'):
-            fields["virtual_host"] = '/' + vhost
-        return self.URI_FORMAT % fields
+        userid = fields["userid"]
+        password = fields["password"]
+        transport = fields["transport"]
+        url = "%s://" % transport
+        if userid:
+            url += userid
+            if include_password and password:
+                url += ':' + password
+            url += '@'
+        url += fields["hostname"]
+
+        # If the transport equals 'mongodb' the
+        # hostname contains a full mongodb connection
+        # URI. Let pymongo retreive the port from there.
+        if port and transport != "mongodb":
+            url += ':' + str(port)
+
+        url += '/' + fields["virtual_host"]
+        return url
 
     def Pool(self, limit=None, preload=None):
         """Pool of connections.
@@ -348,6 +481,18 @@ class BrokerConnection(object):
         """
         return ChannelPool(self, limit, preload)
 
+    def Producer(self, channel=None, *args, **kwargs):
+        from .messaging import Producer
+        if channel is None:
+            channel = self   # use default channel support.
+        return Producer(channel, *args, **kwargs)
+
+    def Consumer(self, queues=None, channel=None, *args, **kwargs):
+        from .messaging import Consumer
+        if channel is None:
+            channel = self  # use default channel support.
+        return Consumer(channel, queues, *args, **kwargs)
+
     def SimpleQueue(self, name, no_ack=None, queue_opts=None,
             exchange_opts=None, channel=None, **kwargs):
         """Create new :class:`~kombu.simple.SimpleQueue`, using a channel
@@ -371,7 +516,7 @@ class BrokerConnection(object):
            object.
 
         """
-        from kombu.simple import SimpleQueue
+        from .simple import SimpleQueue
 
         channel_autoclose = False
         if channel is None:
@@ -391,7 +536,7 @@ class BrokerConnection(object):
         and acknowledgements are disabled (``no_ack``).
 
         """
-        from kombu.simple import SimpleBuffer
+        from .simple import SimpleBuffer
 
         channel_autoclose = False
         if channel is None:
@@ -424,6 +569,13 @@ class BrokerConnection(object):
         self.release()
 
     @property
+    def connected(self):
+        """Returns true if the connection has been established."""
+        return (not self._closed and
+                self._connection is not None and
+                self.transport.verify_connection(self._connection))
+
+    @property
     def connection(self):
         """The underlying connection object.
 
@@ -432,17 +584,24 @@ class BrokerConnection(object):
             depend on the interface of this object.
 
         """
-        if self._closed:
-            return
-        if not self._connection or not \
-                self.transport.verify_connection(self._connection):
-            self._connection = self._establish_connection()
-            self._closed = False
-        return self._connection
+        if not self._closed:
+            if not self.connected:
+                self._default_channel = None
+                self._connection = self._establish_connection()
+                self._closed = False
+            return self._connection
+
+    @property
+    def default_channel(self):
+        # make sure we're still connected, and if not refresh.
+        self.connection
+        if self._default_channel is None:
+            self._default_channel = self.channel()
+        return self._default_channel
 
     @property
     def host(self):
-        """The host as a hostname/port pair separated by colon."""
+        """The host as a host name/port pair separated by colon."""
         return ":".join([self.hostname, str(self.port)])
 
     @property
@@ -464,6 +623,7 @@ Connection = BrokerConnection
 
 
 class Resource(object):
+    LimitExceeded = exceptions.LimitExceeded
 
     def __init__(self, limit=None, preload=None):
         self.limit = limit
@@ -474,7 +634,7 @@ class Resource(object):
         self.setup()
 
     def setup(self):
-        raise NotImplementedError("subclass responsibilty")
+        raise NotImplementedError("subclass responsibility")
 
     def _add_when_empty(self):
         if self.limit and len(self._dirty) >= self.limit:
@@ -499,22 +659,22 @@ class Resource(object):
         if self.limit:
             while 1:
                 try:
-                    resource = self._resource.get(block=block, timeout=timeout)
+                    R = self._resource.get(block=block, timeout=timeout)
                 except Empty:
                     self._add_when_empty()
                 else:
-                    resource = self.prepare(resource)
-                    self._dirty.add(resource)
+                    R = self.prepare(R)
+                    self._dirty.add(R)
                     break
         else:
-            resource = self.prepare(self.new())
+            R = self.prepare(self.new())
 
         @wraps(self.release)
         def _release():
-            self.release(resource)
-        resource.release = _release
+            self.release(R)
+        R.release = _release
 
-        return resource
+        return R
 
     def prepare(self, resource):
         return resource
@@ -524,6 +684,13 @@ class Resource(object):
 
     def release_resource(self, resource):
         pass
+
+    def replace(self, resource):
+        """Replace resource with a new instance.  This can be used in case
+        of defective resources."""
+        if self.limit:
+            self._dirty.discard(resource)
+        self.close_resource(resource)
 
     def release(self, resource):
         """Release resource so it can be used by another thread.
@@ -554,34 +721,53 @@ class Resource(object):
                 dres = dirty.pop()
             except KeyError:
                 break
-            self.close_resource(dres)
+            try:
+                self.close_resource(dres)
+            except AttributeError:  # Issue #78
+                pass
 
-        resource.mutex.acquire()
+        mutex = getattr(resource, "mutex", None)
+        if mutex:
+            mutex.acquire()
         try:
             while 1:
                 try:
                     res = resource.queue.pop()
                 except IndexError:
                     break
-                self.close_resource(res)
+                try:
+                    self.close_resource(res)
+                except AttributeError:
+                    pass  # Issue #78
         finally:
-            resource.mutex.release()
+            if mutex:
+                mutex.release()
 
+    if os.environ.get("KOMBU_DEBUG_POOL"):  # pragma: no cover
+        _orig_acquire = acquire
+        _orig_release = release
 
-class PoolChannelContext(object):
+        _next_resource_id = 0
 
-    def __init__(self, pool, block=False):
-        self.pool = pool
-        self.block = block
+        def acquire(self, *args, **kwargs):  # noqa
+            import traceback
+            id = self._next_resource_id = self._next_resource_id + 1
+            print("+%s ACQUIRE %s" % (id, self.__class__.__name__, ))
+            r = self._orig_acquire(*args, **kwargs)
+            r._resource_id = id
+            print("-%s ACQUIRE %s" % (id, self.__class__.__name__, ))
+            if not hasattr(r, "acquired_by"):
+                r.acquired_by = []
+            r.acquired_by.append(traceback.format_stack())
+            return r
 
-    def __enter__(self):
-        self.conn = self.pool.acquire(block=self.block)
-        self.chan = self.conn.channel()
-        return self.conn, self.chan
-
-    def __exit__(self, *exc_info):
-        self.chan.close()
-        self.conn.release()
+        def release(self, resource):  # noqa
+            id = resource._resource_id
+            print("+%s RELEASE %s" % (id, self.__class__.__name__, ))
+            r = self._orig_release(resource)
+            print("-%s RELEASE %s" % (id, self.__class__.__name__, ))
+            self._next_resource_id -= 1
+            return r
 
 
 class ConnectionPool(Resource):
@@ -598,20 +784,28 @@ class ConnectionPool(Resource):
     def release_resource(self, resource):
         resource._debug("released")
 
+    def close_resource(self, resource):
+        resource._close()
+
+    @contextmanager
     def acquire_channel(self, block=False):
-        return PoolChannelContext(self, block)
+        with self.acquire(block=block) as connection:
+            yield connection, connection.default_channel
 
     def setup(self):
         if self.limit:
             for i in xrange(self.limit):
-                conn = self.new()
                 if i < self.preload:
+                    conn = self.new()
                     conn.connect()
+                else:
+                    conn = self.new
                 self._resource.put_nowait(conn)
 
     def prepare(self, resource):
+        if callable(resource):
+            resource = resource()
         resource._debug("acquired")
-        resource.connect()
         return resource
 
 
@@ -628,8 +822,9 @@ class ChannelPool(Resource):
 
     def setup(self):
         channel = self.new()
-        for i in xrange(self.limit):
-            self._resource.put_nowait(
+        if self.limit:
+            for i in xrange(self.limit):
+                self._resource.put_nowait(
                     i < self.preload and channel() or channel)
 
     def prepare(self, channel):

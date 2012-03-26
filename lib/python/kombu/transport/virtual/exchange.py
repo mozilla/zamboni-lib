@@ -5,10 +5,12 @@ kombu.transport.virtual.exchange
 Implementations of the standard exchanges defined
 by the AMQ protocol  (excluding the `headers` exchange).
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 import re
 
 
@@ -32,13 +34,13 @@ class ExchangeType(object):
         raise NotImplementedError("subclass responsibility")
 
     def prepare_bind(self, queue, exchange, routing_key, arguments):
-        """:returns: `(routing_key, regex, queue)` tuple to store
+        """Returns tuple of `(routing_key, regex, queue)` to be stored
         for bindings to this exchange."""
         return routing_key, None, queue
 
     def equivalent(self, prev, exchange, type, durable, auto_delete,
             arguments):
-        """Returns true if `prev` and `*exchange* is equivalent."""
+        """Returns true if `prev` and `exchange` is equivalent."""
         return (type == prev["type"] and
                 durable == prev["durable"] and
                 auto_delete == prev["auto_delete"] and
@@ -51,12 +53,19 @@ class DirectExchange(ExchangeType):
 
     def lookup(self, table, exchange, routing_key, default):
         return [queue for rkey, _, queue in table
-                    if rkey == routing_key] or [default]
+                    if rkey == routing_key]
+
+    def deliver(self, message, exchange, routing_key, **kwargs):
+        _lookup = self.channel._lookup
+        _put = self.channel._put
+        for queue in _lookup(exchange, routing_key):
+            _put(queue, message, **kwargs)
 
 
 class TopicExchange(ExchangeType):
-    """The `topic` exchanges routes based on words separated by dots, and
-    wildcard characters `*` (any single word), and `#` (one or more words)."""
+    """The `topic` exchange routes messages based on words separated by
+    dots, using wildcard characters ``*`` (any single word), and ``#``
+    (one or more words)."""
     type = "topic"
 
     #: map of wildcard to regex conversions
@@ -67,8 +76,16 @@ class TopicExchange(ExchangeType):
     _compiled = {}
 
     def lookup(self, table, exchange, routing_key, default):
-        return  [queue for rkey, pattern, queue in table
-                            if self._match(pattern, routing_key)] or [default]
+        return [queue for rkey, pattern, queue in table
+                        if self._match(pattern, routing_key)]
+
+    def deliver(self, message, exchange, routing_key, **kwargs):
+        _lookup = self.channel._lookup
+        _put = self.channel._put
+        deadletter = self.channel.deadletter_queue
+        for queue in [q for q in _lookup(exchange, routing_key)
+                            if q and q != deadletter]:
+            _put(queue, message, **kwargs)
 
     def prepare_bind(self, queue, exchange, routing_key, arguments):
         return routing_key, self.key_to_pattern(routing_key), queue
@@ -103,6 +120,10 @@ class FanoutExchange(ExchangeType):
 
     def lookup(self, table, exchange, routing_key, default):
         return [queue for _, _, queue in table]
+
+    def deliver(self, message, exchange, routing_key, **kwargs):
+        if self.channel.supports_fanout:
+            self.channel._put_fanout(exchange, message, **kwargs)
 
 
 #: Map of standard exchange types and corresponding classes.

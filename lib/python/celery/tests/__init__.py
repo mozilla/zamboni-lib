@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import logging
 import os
 import sys
@@ -11,10 +13,12 @@ os.environ.setdefault("CELERY_CONFIG_MODULE", config_module)
 os.environ["CELERY_LOADER"] = "default"
 os.environ["EVENTLET_NOPATCH"] = "yes"
 os.environ["GEVENT_NOPATCH"] = "yes"
+os.environ["KOMBU_DISABLE_LIMIT_PROTECTION"] = "yes"
 
 try:
-    WindowsError = WindowsError
+    WindowsError = WindowsError  # noqa
 except NameError:
+
     class WindowsError(Exception):
         pass
 

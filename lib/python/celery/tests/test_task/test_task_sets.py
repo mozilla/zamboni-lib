@@ -1,13 +1,13 @@
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import anyjson
-import warnings
 
 from celery.app import app_or_default
 from celery.task import Task
 from celery.task.sets import subtask, TaskSet
 
-from celery.tests.utils import unittest
-from celery.tests.utils import execute_context
-from celery.tests.compat import catch_warnings
+from celery.tests.utils import Case
 
 
 class MockTask(Task):
@@ -25,7 +25,7 @@ class MockTask(Task):
         return (args, kwargs, options)
 
 
-class test_subtask(unittest.TestCase):
+class test_subtask(Case):
 
     def test_behaves_like_type(self):
         s = subtask("tasks.add", (2, 2), {"cache": True},
@@ -87,44 +87,18 @@ class test_subtask(unittest.TestCase):
                          subtask(anyjson.deserialize(
                              anyjson.serialize(s))))
 
+    def test_repr(self):
+        s = MockTask.subtask((2, ), {"cache": True})
+        self.assertIn("2", repr(s))
+        self.assertIn("cache=True", repr(s))
 
-class test_TaskSet(unittest.TestCase):
+    def test_reduce(self):
+        s = MockTask.subtask((2, ), {"cache": True})
+        cls, args, _ = s.__reduce__()
+        self.assertDictEqual(dict(cls(*args)), dict(s))
 
-    def test_interface__compat(self):
-        warnings.resetwarnings()
 
-        def with_catch_warnings(log):
-            ts = TaskSet(MockTask, [[(2, 2)], [(4, 4)], [(8, 8)]])
-            self.assertTrue(log)
-            self.assertIn("Using this invocation of TaskSet is deprecated",
-                          log[0].message.args[0])
-            self.assertListEqual(ts.tasks,
-                                 [MockTask.subtask((i, i))
-                                    for i in (2, 4, 8)])
-            return ts
-
-        context = catch_warnings(record=True)
-        execute_context(context, with_catch_warnings)
-
-        # TaskSet.task (deprecated)
-        def with_catch_warnings2(log):
-            ts = TaskSet(MockTask, [[(2, 2)], [(4, 4)], [(8, 8)]])
-            self.assertEqual(ts.task.name, MockTask.name)
-            self.assertTrue(log)
-            self.assertIn("TaskSet.task is deprecated",
-                          log[0].message.args[0])
-
-        execute_context(catch_warnings(record=True), with_catch_warnings2)
-
-        # TaskSet.task_name (deprecated)
-        def with_catch_warnings3(log):
-            ts = TaskSet(MockTask, [[(2, 2)], [(4, 4)], [(8, 8)]])
-            self.assertEqual(ts.task_name, MockTask.name)
-            self.assertTrue(log)
-            self.assertIn("TaskSet.task_name is deprecated",
-                          log[0].message.args[0])
-
-        execute_context(catch_warnings(record=True), with_catch_warnings3)
+class test_TaskSet(Case):
 
     def test_task_arg_can_be_iterable__compat(self):
         ts = TaskSet([MockTask.subtask((i, i))
@@ -162,6 +136,13 @@ class test_TaskSet(unittest.TestCase):
                         for i in (2, 4, 8)])
         ts.apply_async()
         self.assertEqual(applied[0], 3)
+
+        class Publisher(object):
+
+            def send(self, *args, **kwargs):
+                pass
+
+        ts.apply_async(publisher=Publisher())
 
     def test_apply(self):
 

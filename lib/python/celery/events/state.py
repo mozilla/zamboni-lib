@@ -1,13 +1,35 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.events.state
+    ~~~~~~~~~~~~~~~~~~~
+
+    This module implements a datastructure used to keep
+    track of the state of a cluster of workers and the tasks
+    it is working on (by consuming events).
+
+    For every event consumed the state is updated,
+    so the state represents the state of the cluster
+    at the time of the last event.
+
+    Snapshots (:mod:`celery.events.snapshot`) can be used to
+    take "pictures" of this state at regular intervals
+    to e.g. store that in a database.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import time
 import heapq
 
 from threading import Lock
 
-from kombu.utils import partition
-
-from celery import states
-from celery.datastructures import AttributeDict, LocalCache
-from celery.utils import kwdict
+from .. import states
+from ..datastructures import AttributeDict, LRUCache
+from ..utils import kwdict
 
 #: Hartbeat expiry time in seconds.  The worker will be considered offline
 #: if no heartbeat is received within this time.
@@ -146,6 +168,9 @@ class Task(Element):
         self.revoked = timestamp
         self.update(states.REVOKED, timestamp, fields)
 
+    def on_unknown_event(self, type, timestamp=None, **fields):
+        self.update(type.upper(), timestamp, fields)
+
     def info(self, fields=None, extra=[]):
         """Information about this task suitable for on-screen display."""
         if fields is None:
@@ -169,8 +194,8 @@ class State(object):
 
     def __init__(self, callback=None,
             max_workers_in_memory=5000, max_tasks_in_memory=10000):
-        self.workers = LocalCache(max_workers_in_memory)
-        self.tasks = LocalCache(max_tasks_in_memory)
+        self.workers = LRUCache(limit=max_workers_in_memory)
+        self.tasks = LRUCache(limit=max_tasks_in_memory)
         self.event_callback = callback
         self.group_handlers = {"worker": self.worker_event,
                                "task": self.task_event}
@@ -178,26 +203,23 @@ class State(object):
 
     def freeze_while(self, fun, *args, **kwargs):
         clear_after = kwargs.pop("clear_after", False)
-        self._mutex.acquire()
-        try:
-            return fun(*args, **kwargs)
-        finally:
-            if clear_after:
-                self._clear()
-            self._mutex.release()
+        with self._mutex:
+            try:
+                return fun(*args, **kwargs)
+            finally:
+                if clear_after:
+                    self._clear()
 
     def clear_tasks(self, ready=True):
-        self._mutex.acquire()
-        try:
+        with self._mutex:
             return self._clear_tasks(ready)
-        finally:
-            self._mutex.release()
 
     def _clear_tasks(self, ready=True):
         if ready:
-            self.tasks = dict((uuid, task)
-                                for uuid, task in self.tasks.items()
-                                    if task.state not in states.READY_STATES)
+            in_progress = dict((uuid, task) for uuid, task in self.itertasks()
+                                if task.state not in states.READY_STATES)
+            self.tasks.clear()
+            self.tasks.update(in_progress)
         else:
             self.tasks.clear()
 
@@ -208,11 +230,8 @@ class State(object):
         self.task_count = 0
 
     def clear(self, ready=True):
-        self._mutex.acquire()
-        try:
+        with self._mutex:
             return self._clear(ready)
-        finally:
-            self._mutex.release()
 
     def get_or_create_worker(self, hostname, **kwargs):
         """Get or create worker by hostname."""
@@ -252,22 +271,27 @@ class State(object):
             self.task_count += 1
         if handler:
             handler(**fields)
+        else:
+            task.on_unknown_event(type, **fields)
         task.worker = worker
 
     def event(self, event):
-        self._mutex.acquire()
-        try:
+        with self._mutex:
             return self._dispatch_event(event)
-        finally:
-            self._mutex.release()
 
     def _dispatch_event(self, event):
         self.event_count += 1
         event = kwdict(event)
-        group, _, type = partition(event.pop("type"), "-")
+        group, _, type = event.pop("type").partition("-")
         self.group_handlers[group](type, event)
         if self.event_callback:
             self.event_callback(self, event)
+
+    def itertasks(self, limit=None):
+        for index, row in enumerate(self.tasks.iteritems()):
+            yield row
+            if limit and index >= limit:
+                break
 
     def tasks_by_timestamp(self, limit=None):
         """Get tasks by timestamp.
@@ -275,7 +299,7 @@ class State(object):
         Returns a list of `(uuid, task)` tuples.
 
         """
-        return self._sort_tasks_by_time(self.tasks.items()[:limit])
+        return self._sort_tasks_by_time(self.itertasks(limit))
 
     def _sort_tasks_by_time(self, tasks):
         """Sort task items by time."""
@@ -289,7 +313,7 @@ class State(object):
 
         """
         return self._sort_tasks_by_time([(uuid, task)
-                for uuid, task in self.tasks.items()[:limit]
+                for uuid, task in self.itertasks(limit)
                     if task.name == name])
 
     def tasks_by_worker(self, hostname, limit=None):
@@ -299,12 +323,12 @@ class State(object):
 
         """
         return self._sort_tasks_by_time([(uuid, task)
-                for uuid, task in self.tasks.items()[:limit]
+                for uuid, task in self.itertasks(limit)
                     if task.worker.hostname == hostname])
 
     def task_types(self):
         """Returns a list of all seen task types."""
-        return list(sorted(set(task.name for task in self.tasks.values())))
+        return list(sorted(set(task.name for task in self.tasks.itervalues())))
 
     def alive_workers(self):
         """Returns a list of (seemingly) alive workers."""

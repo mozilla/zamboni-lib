@@ -1,3 +1,16 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.utils.patch
+    ~~~~~~~~~~~~~~~~~~
+
+    Monkey-patch to ensure loggers are process aware.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import logging
 
 _process_aware = False
@@ -9,7 +22,7 @@ def _patch_logger_class():
     try:
         from multiprocessing.process import current_process
     except ImportError:
-        current_process = None
+        current_process = None  # noqa
 
     logging._acquireLock()
     try:

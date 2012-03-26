@@ -1,16 +1,23 @@
-"""celery.registry"""
+# -*- coding: utf-8 -*-
+"""
+    celery.registry
+    ~~~~~~~~~~~~~~~
+
+    Registry of available tasks.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import inspect
 
-from celery.exceptions import NotRegistered
-from celery.utils.compat import UserDict
+from .exceptions import NotRegistered
 
 
-class TaskRegistry(UserDict):
-
+class TaskRegistry(dict):
     NotRegistered = NotRegistered
-
-    def __init__(self):
-        self.data = {}
 
     def regular(self):
         """Get all regular task types."""
@@ -27,8 +34,7 @@ class TaskRegistry(UserDict):
         instance.
 
         """
-        task = inspect.isclass(task) and task() or task
-        self.data[task.name] = task
+        self[task.name] = inspect.isclass(task) and task() or task
 
     def unregister(self, name):
         """Unregister task by name.
@@ -49,18 +55,12 @@ class TaskRegistry(UserDict):
 
     def filter_types(self, type):
         """Return all tasks of a specific type."""
-        return dict((task_name, task) for task_name, task in self.data.items()
-                                        if task.type == type)
-
-    def __getitem__(self, key):
-        try:
-            return UserDict.__getitem__(self, key)
-        except KeyError:
-            raise self.NotRegistered(key)
+        return dict((name, task) for name, task in self.iteritems()
+                                    if task.type == type)
 
     def pop(self, key, *args):
         try:
-            return UserDict.pop(self, key, *args)
+            return dict.pop(self, key, *args)
         except KeyError:
             raise self.NotRegistered(key)
 

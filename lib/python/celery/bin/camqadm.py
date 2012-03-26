@@ -1,9 +1,14 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """camqadm
 
 .. program:: camqadm
 
 """
+from __future__ import absolute_import
+
+if __name__ == "__main__" and __package__ is None:
+    __package__ = "celery.bin.celeryctl"
+
 import cmd
 import sys
 import shlex
@@ -12,11 +17,11 @@ import pprint
 from itertools import count
 
 from amqplib import client_0_8 as amqp
-from kombu.utils import partition
 
-from celery.app import app_or_default
-from celery.bin.base import Command
-from celery.utils import padlist
+from ..app import app_or_default
+from ..utils import padlist
+
+from .base import Command
 
 # Valid string -> bool coercions.
 BOOLS = {"1": True, "0": False,
@@ -247,7 +252,7 @@ class AMQShell(cmd.Cmd):
         say("unknown syntax: '%s'. how about some 'help'?" % line)
 
     def get_names(self):
-        return set(self.builtins.keys() + self.amqp.keys())
+        return set(self.builtins) | set(self.amqp)
 
     def completenames(self, text, *ignored):
         """Return all commands starting with `text`, for tab-completion."""
@@ -257,7 +262,7 @@ class AMQShell(cmd.Cmd):
         if first:
             return first
         return [cmd for cmd in names
-                    if partition(cmd, ".")[2].startswith(text)]
+                    if cmd.partition(".")[2].startswith(text)]
 
     def dispatch(self, cmd, argline):
         """Dispatch and execute the command.

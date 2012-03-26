@@ -1,26 +1,22 @@
-import warnings
+from __future__ import absolute_import
+from __future__ import with_statement
 
 from celery.task import base
 
 from celery.tests.compat import catch_warnings
-from celery.tests.utils import unittest
-from celery.tests.utils import execute_context
+from celery.tests.utils import Case
 
 
 def add(x, y):
     return x + y
 
 
-class test_decorators(unittest.TestCase):
+class test_decorators(Case):
 
     def setUp(self):
-        warnings.resetwarnings()
-
-        def with_catch_warnings(log):
+        with catch_warnings(record=True):
             from celery import decorators
-            return decorators
-        context = catch_warnings(record=True)
-        self.decorators = execute_context(context, with_catch_warnings)
+            self.decorators = decorators
 
     def assertCompatDecorator(self, decorator, type, **opts):
         task = decorator(**opts)(add)

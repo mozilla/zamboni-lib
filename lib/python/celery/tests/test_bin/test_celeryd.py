@@ -1,42 +1,40 @@
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import logging
 import os
 import sys
-import warnings
 
+from functools import wraps
 try:
     from multiprocessing import current_process
 except ImportError:
-    current_process = None
+    current_process = None  # noqa
 
-
+from mock import patch
 from nose import SkipTest
-from kombu.tests.utils import redirect_stdouts
 
 from celery import Celery
 from celery import platforms
 from celery import signals
 from celery import current_app
 from celery.apps import worker as cd
-from celery.bin.celeryd import WorkerCommand, windows_main, \
-                               main as celeryd_main
-from celery.exceptions import ImproperlyConfigured
-from celery.utils import patch
-from celery.utils.functional import wraps
+from celery.bin.celeryd import WorkerCommand, main as celeryd_main
+from celery.exceptions import ImproperlyConfigured, SystemTerminate
 
-from celery.tests.compat import catch_warnings
-from celery.tests.utils import execute_context
-from celery.tests.utils import AppCase
-from celery.tests.utils import StringIO
+from celery.tests.utils import (AppCase, WhateverIO, mask_modules,
+                                reset_modules, skip_unless_module)
 
 
-patch.ensure_process_aware_logger()
+from celery.utils.patch import ensure_process_aware_logger
+ensure_process_aware_logger()
 
 
 def disable_stdouts(fun):
 
     @wraps(fun)
     def disable(*args, **kwargs):
-        sys.stdout, sys.stderr = StringIO(), StringIO()
+        sys.stdout, sys.stderr = WhateverIO(), WhateverIO()
         try:
             return fun(*args, **kwargs)
         finally:
@@ -59,6 +57,49 @@ class Worker(cd.Worker):
     WorkController = _WorkController
 
 
+class test_compilation(AppCase):
+
+    def test_no_multiprocessing(self):
+        with mask_modules("multiprocessing"):
+            with reset_modules("celery.apps.worker"):
+                from celery.apps.worker import multiprocessing
+                self.assertIsNone(multiprocessing)
+
+    def test_cpu_count_no_mp(self):
+        with mask_modules("multiprocessing"):
+            with reset_modules("celery.apps.worker"):
+                from celery.apps.worker import cpu_count
+                self.assertEqual(cpu_count(), 2)
+
+    @skip_unless_module("multiprocessing")
+    def test_no_cpu_count(self):
+
+        @patch("multiprocessing.cpu_count")
+        def _do_test(pcount):
+            pcount.side_effect = NotImplementedError("cpu_count")
+            from celery.apps.worker import cpu_count
+            self.assertEqual(cpu_count(), 2)
+            pcount.assert_called_with()
+
+        _do_test()
+
+    def test_process_name_wo_mp(self):
+        with mask_modules("multiprocessing"):
+            with reset_modules("celery.apps.worker"):
+                from celery.apps.worker import get_process_name
+                self.assertIsNone(get_process_name())
+
+    @skip_unless_module("multiprocessing")
+    def test_process_name_w_mp(self):
+
+        @patch("multiprocessing.current_process")
+        def _do_test(current_process):
+            from celery.apps.worker import get_process_name
+            self.assertTrue(get_process_name())
+
+        _do_test()
+
+
 class test_Worker(AppCase):
     Worker = Worker
 
@@ -71,6 +112,27 @@ class test_Worker(AppCase):
         self.assertTrue("foo" in celery.amqp.queues)
 
     @disable_stdouts
+    def test_windows_B_option(self):
+        celery = Celery(set_as_current=False)
+        celery.IS_WINDOWS = True
+        with self.assertRaises(SystemExit):
+            celery.Worker(embed_clockservice=True)
+
+    def test_tasklist(self):
+        celery = Celery(set_as_current=False)
+        worker = celery.Worker()
+        self.assertTrue(worker.tasklist(include_builtins=True))
+        worker.tasklist(include_builtins=False)
+
+    def test_extra_info(self):
+        celery = Celery(set_as_current=False)
+        worker = celery.Worker()
+        worker.loglevel = logging.WARNING
+        self.assertFalse(worker.extra_info())
+        worker.loglevel = logging.INFO
+        self.assertTrue(worker.extra_info())
+
+    @disable_stdouts
     def test_loglevel_string(self):
         worker = self.Worker(loglevel="INFO")
         self.assertEqual(worker.loglevel, logging.INFO)
@@ -78,11 +140,13 @@ class test_Worker(AppCase):
     def test_run_worker(self):
         handlers = {}
 
-        def i(sig, handler):
-            handlers[sig] = handler
+        class Signals(platforms.Signals):
 
-        p = platforms.install_signal_handler
-        platforms.install_signal_handler = i
+            def __setitem__(self, sig, handler):
+                handlers[sig] = handler
+
+        p = platforms.signals
+        platforms.signals = Signals()
         try:
             w = self.Worker()
             w._isatty = False
@@ -98,7 +162,7 @@ class test_Worker(AppCase):
                 self.assertIn(sig, handlers)
             self.assertNotIn("SIGHUP", handlers)
         finally:
-            platforms.install_signal_handler = p
+            platforms.signals = p
 
     @disable_stdouts
     def test_startup_info(self):
@@ -108,6 +172,8 @@ class test_Worker(AppCase):
         worker.loglevel = logging.DEBUG
         self.assertTrue(worker.startup_info())
         worker.loglevel = logging.INFO
+        self.assertTrue(worker.startup_info())
+        worker.autoscale = 13, 10
         self.assertTrue(worker.startup_info())
 
     @disable_stdouts
@@ -140,8 +206,8 @@ class test_Worker(AppCase):
             self.assertNotIn("celery", app.amqp.queues.consume_from)
 
             c.CELERY_CREATE_MISSING_QUEUES = False
-            self.assertRaises(ImproperlyConfigured,
-                    self.Worker(queues=["image"]).init_queues)
+            with self.assertRaises(ImproperlyConfigured):
+                self.Worker(queues=["image"]).init_queues()
             c.CELERY_CREATE_MISSING_QUEUES = True
             worker = self.Worker(queues=["image"])
             worker.init_queues()
@@ -172,7 +238,8 @@ class test_Worker(AppCase):
 
     @disable_stdouts
     def test_unknown_loglevel(self):
-        self.assertRaises(SystemExit, self.Worker, loglevel="ALIEN")
+        with self.assertRaises(SystemExit):
+            self.Worker(loglevel="ALIEN")
         worker1 = self.Worker(loglevel=0xFFFF)
         self.assertEqual(worker1.loglevel, 0xFFFF)
 
@@ -180,23 +247,18 @@ class test_Worker(AppCase):
         app = current_app
         if app.IS_WINDOWS:
             raise SkipTest("Not applicable on Windows")
-        warnings.resetwarnings()
 
-        def geteuid():
+        def getuid():
             return 0
 
-        prev, os.geteuid = os.geteuid, geteuid
+        prev, os.getuid = os.getuid, getuid
         try:
-            def with_catch_warnings(log):
+            with self.assertWarnsRegex(RuntimeWarning,
+                    r'superuser privileges is discouraged'):
                 worker = self.Worker()
                 worker.run()
-                self.assertTrue(log)
-                self.assertIn("superuser privileges is not encouraged",
-                              log[0].message.args[0])
-            context = catch_warnings(record=True)
-            execute_context(context, with_catch_warnings)
         finally:
-            os.geteuid = prev
+            os.getuid = prev
 
     @disable_stdouts
     def test_use_pidfile(self):
@@ -232,7 +294,8 @@ class test_Worker(AppCase):
         worker = self.Worker()
         worker.redirect_stdouts = False
         worker.redirect_stdouts_to_logger()
-        self.assertRaises(AttributeError, getattr, sys.stdout, "logger")
+        with self.assertRaises(AttributeError):
+            sys.stdout.logger
 
     def test_redirect_stdouts_already_handled(self):
         logging_setup = [False]
@@ -246,7 +309,8 @@ class test_Worker(AppCase):
             worker.app.log.__class__._setup = False
             worker.redirect_stdouts_to_logger()
             self.assertTrue(logging_setup[0])
-            self.assertRaises(AttributeError, getattr, sys.stdout, "logger")
+            with self.assertRaises(AttributeError):
+                sys.stdout.logger
         finally:
             signals.setup_logging.disconnect(on_logging_setup)
 
@@ -314,12 +378,6 @@ class test_Worker(AppCase):
 
 class test_funs(AppCase):
 
-    @redirect_stdouts
-    def test_windows_main(self, stdout, stderr):
-        windows_main()
-        self.assertIn("celeryd command does not work on Windows",
-                      stderr.getvalue())
-
     @disable_stdouts
     def test_set_process_status(self):
         try:
@@ -379,16 +437,16 @@ class test_signal_handlers(AppCase):
     def psig(self, fun, *args, **kwargs):
         handlers = {}
 
-        def i(sig, handler):
-            handlers[sig] = handler
+        class Signals(platforms.Signals):
+            def __setitem__(self, sig, handler):
+                handlers[sig] = handler
 
-        p, platforms.install_signal_handler = \
-                platforms.install_signal_handler, i
+        p, platforms.signals = platforms.signals, Signals()
         try:
             fun(*args, **kwargs)
             return handlers
         finally:
-            platforms.install_signal_handler = p
+            platforms.signals = p
 
     @disable_stdouts
     def test_worker_int_handler(self):
@@ -396,20 +454,21 @@ class test_signal_handlers(AppCase):
         handlers = self.psig(cd.install_worker_int_handler, worker)
         next_handlers = {}
 
-        def i(sig, handler):
-            next_handlers[sig] = handler
+        class Signals(platforms.Signals):
 
-        p = platforms.install_signal_handler
-        platforms.install_signal_handler = i
+            def __setitem__(self, sig, handler):
+                next_handlers[sig] = handler
+
+        p, platforms.signals = platforms.signals, Signals()
         try:
-            self.assertRaises(SystemExit, handlers["SIGINT"],
-                              "SIGINT", object())
+            with self.assertRaises(SystemExit):
+                handlers["SIGINT"]("SIGINT", object())
             self.assertTrue(worker.stopped)
         finally:
-            platforms.install_signal_handler = p
+            platforms.signals = p
 
-        self.assertRaises(SystemExit, next_handlers["SIGINT"],
-                          "SIGINT", object())
+        with self.assertRaises(SystemExit):
+            next_handlers["SIGINT"]("SIGINT", object())
         self.assertTrue(worker.terminated)
 
     @disable_stdouts
@@ -421,8 +480,8 @@ class test_signal_handlers(AppCase):
         try:
             worker = self._Worker()
             handlers = self.psig(cd.install_worker_int_handler, worker)
-            self.assertRaises(SystemExit, handlers["SIGINT"],
-                            "SIGINT", object())
+            with self.assertRaises(SystemExit):
+                handlers["SIGINT"]("SIGINT", object())
             self.assertFalse(worker.stopped)
         finally:
             process.name = name
@@ -442,8 +501,8 @@ class test_signal_handlers(AppCase):
         try:
             worker = self._Worker()
             handlers = self.psig(cd.install_worker_int_again_handler, worker)
-            self.assertRaises(SystemExit, handlers["SIGINT"],
-                            "SIGINT", object())
+            with self.assertRaises(SystemExit):
+                handlers["SIGINT"]("SIGINT", object())
             self.assertFalse(worker.terminated)
         finally:
             process.name = name
@@ -452,8 +511,8 @@ class test_signal_handlers(AppCase):
     def test_worker_term_handler(self):
         worker = self._Worker()
         handlers = self.psig(cd.install_worker_term_handler, worker)
-        self.assertRaises(SystemExit, handlers["SIGTERM"],
-                          "SIGTERM", object())
+        with self.assertRaises(SystemExit):
+            handlers["SIGTERM"]("SIGTERM", object())
         self.assertTrue(worker.stopped)
 
     def test_worker_cry_handler(self):
@@ -484,8 +543,8 @@ class test_signal_handlers(AppCase):
         try:
             worker = self._Worker()
             handlers = self.psig(cd.install_worker_term_handler, worker)
-            self.assertRaises(SystemExit, handlers["SIGTERM"],
-                          "SIGTERM", object())
+            with self.assertRaises(SystemExit):
+                handlers["SIGTERM"]("SIGTERM", object())
             self.assertFalse(worker.stopped)
         finally:
             process.name = name
@@ -508,3 +567,11 @@ class test_signal_handlers(AppCase):
             self.assertTrue(argv)
         finally:
             os.execv = execv
+
+    @disable_stdouts
+    def test_worker_term_hard_handler(self):
+        worker = self._Worker()
+        handlers = self.psig(cd.install_worker_term_hard_handler, worker)
+        with self.assertRaises(SystemTerminate):
+            handlers["SIGQUIT"]("SIGQUIT", object())
+        self.assertTrue(worker.terminated)

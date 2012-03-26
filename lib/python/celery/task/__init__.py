@@ -1,12 +1,25 @@
 # -*- coding: utf-8 -*-
-import warnings
+"""
+    celery.task
+    ~~~~~~~~~~~
 
-from celery.app import app_or_default
-from celery.task.base import Task, PeriodicTask
-from celery.task.sets import TaskSet, subtask
-from celery.task.control import discard_all
+    Creating tasks, subtasks, sets and chords.
 
-__all__ = ["Task", "TaskSet", "PeriodicTask", "subtask", "discard_all"]
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
+from ..app import app_or_default, current_task as _current_task
+from ..local import Proxy
+
+from .base import Task, PeriodicTask        # noqa
+from .sets import group, TaskSet, subtask   # noqa
+from .chords import chord                   # noqa
+from .control import discard_all            # noqa
+
+current = Proxy(_current_task)
 
 
 def task(*args, **kwargs):
@@ -16,7 +29,7 @@ def task(*args, **kwargs):
 
     .. code-block:: python
 
-        @task()
+        @task
         def refresh_feed(url):
             return Feed.objects.get(url=url).refresh()
 
@@ -49,7 +62,7 @@ def periodic_task(*args, **options):
 
             .. code-block:: python
 
-                @task()
+                @task
                 def refresh_feed(url):
                     return Feed.objects.get(url=url).refresh()
 
@@ -57,12 +70,14 @@ def periodic_task(*args, **options):
 
             .. code-block:: python
 
+                from celery.task import current
+
                 @task(exchange="feeds")
-                def refresh_feed(url, **kwargs):
+                def refresh_feed(url):
                     try:
                         return Feed.objects.get(url=url).refresh()
                     except socket.error, exc:
-                        refresh_feed.retry(args=[url], kwargs=kwargs, exc=exc)
+                        current.retry(exc=exc)
 
             Calling the resulting task:
 
@@ -78,22 +93,3 @@ def periodic_task(*args, **options):
 @task(name="celery.backend_cleanup")
 def backend_cleanup():
     backend_cleanup.backend.cleanup()
-
-
-class PingTask(Task):  # ✞
-    name = "celery.ping"
-
-    def run(self, **kwargs):
-        return "pong"
-
-
-def ping():  # ✞
-    """Deprecated and scheduled for removal in Celery 2.3.
-
-    Please use :meth:`celery.task.control.ping` instead.
-
-    """
-    warnings.warn(DeprecationWarning(
-        "The ping task has been deprecated and will be removed in Celery "
-        "v2.3.  Please use inspect.ping instead."))
-    return PingTask.apply_async().get()

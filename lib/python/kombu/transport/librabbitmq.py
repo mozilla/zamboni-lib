@@ -4,49 +4,32 @@ kombu.transport.librabbitmq
 
 pylibrabbitmq transport.
 
-:copyright: (c) 2010 - 2011 by Ask Solem.
+:copyright: (c) 2010 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
 import socket
 import pylibrabbitmq as amqp
 
 from pylibrabbitmq import ChannelError, ConnectionError
 
-from kombu.transport import base
+from . import base
 
 DEFAULT_PORT = 5672
 
 
 class Message(base.Message):
-    """A message received by the broker.
 
-    .. attribute:: body
-
-        The message body.
-
-    .. attribute:: delivery_tag
-
-        The message delivery tag, uniquely identifying this message.
-
-    .. attribute:: channel
-
-        The channel instance the message was received on.
-
-    """
-
-    def __init__(self, channel, message, **kwargs):
-        props = message.properties
-        info = message.delivery_info
+    def __init__(self, body, props, info, channel):
         super(Message, self).__init__(channel,
-                body=message.body,
+                body=body,
                 delivery_info=info,
                 properties=props,
                 delivery_tag=info["delivery_tag"],
                 content_type=props["content_type"],
                 content_encoding=props["content_encoding"],
-                headers=props.get("application_headers"),
-                **kwargs)
+                headers=props.get("headers"))
 
 
 class Channel(amqp.Channel, base.StdChannel):
@@ -56,15 +39,12 @@ class Channel(amqp.Channel, base.StdChannel):
                 content_type=None, content_encoding=None, headers=None,
                 properties=None):
         """Encapsulate data into a AMQP message."""
-        properties = dict({"content_type": content_type,
+        properties = properties if properties is not None else {}
+        properties.update({"content_type": content_type,
                            "content_encoding": content_encoding,
-                           "application_headers": headers,
-                           "priority": priority}, **properties or {})
+                           "headers": headers,
+                           "priority": priority})
         return amqp.Message(body, properties=properties)
-
-    def message_to_python(self, raw_message):
-        """Convert encoded message body back to a Python value."""
-        return self.Message(self, raw_message)
 
 
 class Connection(amqp.Connection):
@@ -94,22 +74,27 @@ class Transport(base.Transport):
     def establish_connection(self):
         """Establish connection to the AMQP broker."""
         conninfo = self.client
-        if conninfo.userid is None:
-            conninfo.userid = "guest"
-        if conninfo.password is None:
-            conninfo.password = "guest"
-        if not conninfo.port:
-            conninfo.port = self.default_port
+        for name, default_value in self.default_connection_params.items():
+            if not getattr(conninfo, name, None):
+                setattr(conninfo, name, default_value)
         conn = self.Connection(host=conninfo.host,
                                userid=conninfo.userid,
                                password=conninfo.password,
                                virtual_host=conninfo.virtual_host,
+                               login_method=conninfo.login_method,
                                insist=conninfo.insist,
                                ssl=conninfo.ssl,
                                connect_timeout=conninfo.connect_timeout)
         conn.client = self.client
+        self.client.drain_events = conn.drain_events
         return conn
 
     def close_connection(self, connection):
         """Close the AMQP broker connection."""
         connection.close()
+
+    @property
+    def default_connection_params(self):
+        return {"userid": "guest", "password": "guest",
+                "port": self.default_port,
+                "hostname": "localhost", "login_method": "AMQPLAIN"}

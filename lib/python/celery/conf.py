@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 
 **DEPRECATED**
@@ -6,8 +7,10 @@ Use :mod:`celery.defaults` instead.
 
 
 """
-from celery import current_app
-from celery.app import defaults
+from __future__ import absolute_import
+
+from . import current_app
+from .app import defaults
 
 _DEFAULTS = defaults.DEFAULTS
 conf = current_app.conf
@@ -66,7 +69,7 @@ BROKER_INSIST = conf.BROKER_INSIST
 BROKER_CONNECTION_TIMEOUT = conf.BROKER_CONNECTION_TIMEOUT
 BROKER_CONNECTION_RETRY = conf.BROKER_CONNECTION_RETRY
 BROKER_CONNECTION_MAX_RETRIES = conf.BROKER_CONNECTION_MAX_RETRIES
-BROKER_BACKEND = conf.BROKER_BACKEND
+BROKER_BACKEND = conf.BROKER_TRANSPORT
 DEFAULT_QUEUE = conf.CELERY_DEFAULT_QUEUE
 DEFAULT_ROUTING_KEY = conf.CELERY_DEFAULT_ROUTING_KEY
 DEFAULT_EXCHANGE = conf.CELERY_DEFAULT_EXCHANGE

@@ -1,3 +1,16 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.utils.serialization
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    Utilities for safely pickling exceptions.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import inspect
 import sys
 import types
@@ -8,10 +21,13 @@ import pickle as pypickle
 try:
     import cPickle as cpickle
 except ImportError:
-    cpickle = None
+    cpickle = None  # noqa
+
+from .encoding import safe_repr
+
 
 if sys.version_info < (2, 6):  # pragma: no cover
-    # cPickle is broken in Python <= 2.5.
+    # cPickle is broken in Python <= 2.6.
     # It unsafely and incorrectly uses relative instead of absolute imports,
     # so e.g.:
     #       exceptions.KeyError
@@ -25,16 +41,8 @@ if sys.version_info < (2, 6):  # pragma: no cover
 else:
     pickle = cpickle or pypickle
 
-
-# BaseException was introduced in Python 2.5.
-try:
-    _error_bases = (BaseException, )
-except NameError:  # pragma: no cover
-    _error_bases = (SystemExit, KeyboardInterrupt)
-
 #: List of base classes we probably don't want to reduce to.
-unwanted_base_classes = (StandardError, Exception) + _error_bases + (object, )
-
+unwanted_base_classes = (StandardError, Exception, BaseException, object)
 
 if sys.version_info < (2, 5):  # pragma: no cover
 
@@ -42,7 +50,8 @@ if sys.version_info < (2, 5):  # pragma: no cover
     def subclass_exception(name, parent, unused):
         return types.ClassType(name, (parent,), {})
 else:
-    def subclass_exception(name, parent, module):
+
+    def subclass_exception(name, parent, module):  # noqa
         return type(name, (parent,), {'__module__': module})
 
 
@@ -124,21 +133,26 @@ class UnpickleableExceptionWrapper(Exception):
     #: The arguments for the original exception.
     exc_args = None
 
-    def __init__(self, exc_module, exc_cls_name, exc_args):
+    def __init__(self, exc_module, exc_cls_name, exc_args, text=None):
         self.exc_module = exc_module
         self.exc_cls_name = exc_cls_name
         self.exc_args = exc_args
-        Exception.__init__(self, exc_module, exc_cls_name, exc_args)
+        self.text = text
+        Exception.__init__(self, exc_module, exc_cls_name, exc_args, text)
+
+    def restore(self):
+        return create_exception_cls(self.exc_cls_name,
+                                    self.exc_module)(*self.exc_args)
+
+    def __str__(self):
+        return self.text
 
     @classmethod
     def from_exception(cls, exc):
         return cls(exc.__class__.__module__,
                    exc.__class__.__name__,
-                   getattr(exc, "args", []))
-
-    def restore(self):
-        return create_exception_cls(self.exc_cls_name,
-                                    self.exc_module)(*self.exc_args)
+                   getattr(exc, "args", []),
+                   safe_repr(exc))
 
 
 def get_pickleable_exception(exc):

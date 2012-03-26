@@ -1,22 +1,52 @@
+# -*- coding: utf-8 -*-
 """
+    celery.worker.mediator
+    ~~~~~~~~~~~~~~~~~~~~~~
 
-Worker Controller Threads
+    The mediator is an internal thread that moves tasks
+    from an internal :class:`Queue` to the worker pool.
+
+    This is only used if rate limits are enabled, as it moves
+    messages from the rate limited queue (which holds tasks
+    that are allowed to be processed) to the pool. Disabling
+    rate limits will also disable this machinery,
+    and can improve performance.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 import logging
-import os
 import sys
-import threading
 import traceback
 
 from Queue import Empty
 
-from celery.app import app_or_default
-from celery.utils.compat import log_with_extra
+from ..abstract import StartStopComponent
+from ..app import app_or_default
+from ..utils.threads import bgThread
 
 
-class Mediator(threading.Thread):
-    """Thread continuously moving tasks from the ready queue into the pool."""
+class WorkerComponent(StartStopComponent):
+    name = "worker.mediator"
+    requires = ("pool", "queues", )
+
+    def __init__(self, w, **kwargs):
+        w.mediator = None
+
+    def include_if(self, w):
+        return not w.disable_rate_limits or w.pool_cls.requires_mediator
+
+    def create(self, w):
+        m = w.mediator = self.instantiate(w.mediator_cls, w.ready_queue,
+                                          app=w.app, callback=w.process_task,
+                                          logger=w.logger)
+        return m
+
+
+class Mediator(bgThread):
 
     #: The task queue, a :class:`~Queue.Queue` instance.
     ready_queue = None
@@ -25,17 +55,14 @@ class Mediator(threading.Thread):
     callback = None
 
     def __init__(self, ready_queue, callback, logger=None, app=None):
-        threading.Thread.__init__(self)
         self.app = app_or_default(app)
         self.logger = logger or self.app.log.get_default_logger()
         self.ready_queue = ready_queue
         self.callback = callback
-        self._shutdown = threading.Event()
-        self._stopped = threading.Event()
-        self.setDaemon(True)
-        self.setName(self.__class__.__name__)
+        self._does_debug = self.logger.isEnabledFor(logging.DEBUG)
+        super(Mediator, self).__init__()
 
-    def move(self):
+    def body(self):
         try:
             task = self.ready_queue.get(timeout=1.0)
         except Empty:
@@ -44,35 +71,18 @@ class Mediator(threading.Thread):
         if task.revoked():
             return
 
-        self.logger.debug(
-            "Mediator: Running callback for task: %s[%s]" % (
-                task.task_name, task.task_id))
+        if self._does_debug:
+            self.logger.debug(
+                "Mediator: Running callback for task: %s[%s]" % (
+                    task.task_name, task.task_id))
 
         try:
             self.callback(task)
         except Exception, exc:
-            log_with_extra(self.logger, logging.ERROR,
-                           "Mediator callback raised exception %r\n%s" % (
-                               exc, traceback.format_exc()),
-                           exc_info=sys.exc_info(),
-                           extra={"data": {"hostname": task.hostname,
-                                           "id": task.task_id,
-                                           "name": task.task_name}})
-
-    def run(self):
-        """Move tasks forver or until :meth:`stop` is called."""
-        while not self._shutdown.isSet():
-            try:
-                self.move()
-            except Exception, exc:
-                self.logger.error("Mediator crash: %r" % (exc, ),
-                    exc_info=sys.exc_info())
-                # exiting by normal means does not work here, so force exit.
-                os._exit(1)
-        self._stopped.set()
-
-    def stop(self):
-        """Gracefully shutdown the thread."""
-        self._shutdown.set()
-        self._stopped.wait()
-        self.join(1e10)
+            self.logger.error("Mediator callback raised exception %r\n%s",
+                              exc, traceback.format_exc(),
+                              exc_info=sys.exc_info(),
+                              extra={"data": {"id": task.task_id,
+                                              "name": task.task_name,
+                                              "hostname": task.hostname}})
+    move = body   # XXX compat

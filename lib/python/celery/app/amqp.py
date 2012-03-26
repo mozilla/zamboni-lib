@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-celery.app.amqp
-===============
+    celery.app.amqp
+    ~~~~~~~~~~~~~~~
 
-AMQ related functionality.
+    AMQ related functionality.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
-:license: BSD, see LICENSE for more details.
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
 
 """
-from datetime import datetime, timedelta
+from __future__ import absolute_import
+
+from datetime import timedelta
 
 from kombu import BrokerConnection, Exchange
-from kombu.connection import Resource
 from kombu import compat as messaging
-from kombu.utils import cached_property
+from kombu.pools import ProducerPool
 
-from celery import routes as _routes
-from celery import signals
-from celery.utils import gen_unique_id, textindent
-from celery.utils import promise, maybe_promise
-from celery.utils.compat import UserDict
+from .. import routes as _routes
+from .. import signals
+from ..utils import cached_property, textindent, uuid
 
 #: List of known options to a Kombu producers send method.
 #: Used to extract the message related options out of any `dict`.
 MSG_OPTIONS = ("mandatory", "priority", "immediate", "routing_key",
-                "serializer", "delivery_mode", "compression")
+               "serializer", "delivery_mode", "compression")
 
 #: Human readable queue declaration.
 QUEUE_FORMAT = """
@@ -46,7 +45,7 @@ def extract_msg_options(options, keep=MSG_OPTIONS):
     return dict((name, options.get(name)) for name in keep)
 
 
-class Queues(UserDict):
+class Queues(dict):
     """Queue name⇒ declaration mapping.
 
     Celery will consult this mapping to find the options
@@ -60,7 +59,7 @@ class Queues(UserDict):
     _consume_from = None
 
     def __init__(self, queues):
-        self.data = {}
+        dict.__init__(self)
         for queue_name, options in (queues or {}).items():
             self.add(queue_name, **options)
 
@@ -90,12 +89,12 @@ class Queues(UserDict):
 
     def format(self, indent=0, indent_first=True):
         """Format routing table into string for log dumps."""
-        queues = self
-        if self._consume_from is not None:
-            queues = self._consume_from
+        active = self.consume_from
+        if not active:
+            return ""
         info = [QUEUE_FORMAT.strip() % dict(
                     name=(name + ":").ljust(12), **config)
-                        for name, config in sorted(queues.items())]
+                        for name, config in sorted(active.iteritems())]
         if indent_first:
             return textindent("\n".join(info), indent)
         return info[0] + "\n" + textindent("\n".join(info[1:]), indent)
@@ -125,10 +124,18 @@ class Queues(UserDict):
         self._consume_from = acc
         self.update(acc)
 
+    @property
+    def consume_from(self):
+        if self._consume_from is not None:
+            return self._consume_from
+        return self
+
     @classmethod
     def with_defaults(cls, queues, default_exchange, default_exchange_type):
         """Alternate constructor that adds default exchange and
         exchange type information to queues that does not have any."""
+        if queues is None:
+            queues = {}
         for opts in queues.values():
             opts.setdefault("exchange", default_exchange),
             opts.setdefault("exchange_type", default_exchange_type)
@@ -136,15 +143,9 @@ class Queues(UserDict):
             opts.setdefault("routing_key", opts.get("binding_key"))
         return cls(queues)
 
-    @property
-    def consume_from(self):
-        if self._consume_from is not None:
-            return self._consume_from
-        return self
-
 
 class TaskPublisher(messaging.Publisher):
-    auto_declare = True
+    auto_declare = False
     retry = False
     retry_policy = None
 
@@ -153,6 +154,7 @@ class TaskPublisher(messaging.Publisher):
         self.retry = kwargs.pop("retry", self.retry)
         self.retry_policy = kwargs.pop("retry_policy",
                                         self.retry_policy or {})
+        self.utc = kwargs.pop("enable_utc", False)
         super(TaskPublisher, self).__init__(*args, **kwargs)
 
     def declare(self):
@@ -162,7 +164,7 @@ class TaskPublisher(messaging.Publisher):
             _exchanges_declared.add(self.exchange.name)
 
     def _declare_queue(self, name, retry=False, retry_policy={}):
-        options = self.app.queues[name]
+        options = self.app.amqp.queues[name]
         queue = messaging.entry_to_queue(name, **options)(self.channel)
         if retry:
             self.connection.ensure(queue, queue.declare, **retry_policy)()
@@ -181,8 +183,9 @@ class TaskPublisher(messaging.Publisher):
             countdown=None, eta=None, task_id=None, taskset_id=None,
             expires=None, exchange=None, exchange_type=None,
             event_dispatcher=None, retry=None, retry_policy=None,
-            queue=None, now=None, retries=0, **kwargs):
+            queue=None, now=None, retries=0, chord=None, **kwargs):
         """Send task message."""
+
         connection = self.connection
         _retry_policy = self.retry_policy
         if retry_policy:  # merge default and custom policy
@@ -198,7 +201,7 @@ class TaskPublisher(messaging.Publisher):
                     exchange_type or self.exchange_type, retry, _retry_policy)
             _exchanges_declared.add(exchange)
 
-        task_id = task_id or gen_unique_id()
+        task_id = task_id or uuid()
         task_args = task_args or []
         task_kwargs = task_kwargs or {}
         if not isinstance(task_args, (list, tuple)):
@@ -206,10 +209,10 @@ class TaskPublisher(messaging.Publisher):
         if not isinstance(task_kwargs, dict):
             raise ValueError("task kwargs must be a dictionary")
         if countdown:                           # Convert countdown to ETA.
-            now = now or datetime.now()
+            now = now or self.app.now()
             eta = now + timedelta(seconds=countdown)
-        if isinstance(expires, int):
-            now = now or datetime.now()
+        if isinstance(expires, (int, float)):
+            now = now or self.app.now()
             expires = now + timedelta(seconds=expires)
         eta = eta and eta.isoformat()
         expires = expires and expires.isoformat()
@@ -220,12 +223,16 @@ class TaskPublisher(messaging.Publisher):
                 "kwargs": task_kwargs or {},
                 "retries": retries or 0,
                 "eta": eta,
-                "expires": expires}
+                "expires": expires,
+                "utc": self.utc}
         if taskset_id:
             body["taskset"] = taskset_id
+        if chord:
+            body["chord"] = chord
 
+        do_retry = retry if retry is not None else self.retry
         send = self.send
-        if retry is None and self.retry or retry:
+        if do_retry:
             send = connection.ensure(self, self.send, **_retry_policy)
         send(body, exchange=exchange, **extract_msg_options(kwargs))
         signals.task_sent.send(sender=task_name, **body)
@@ -246,27 +253,18 @@ class TaskPublisher(messaging.Publisher):
             self.close()
 
 
-class PublisherPool(Resource):
+class PublisherPool(ProducerPool):
 
-    def __init__(self, limit=None, app=None):
+    def __init__(self, app):
         self.app = app
-        self.connections = self.app.broker_connection().Pool(limit=limit)
-        super(PublisherPool, self).__init__(limit=limit)
+        super(PublisherPool, self).__init__(self.app.pool,
+                                            limit=self.app.pool.limit)
 
-    def create_publisher(self):
-        return self.app.amqp.TaskPublisher(self.connections.acquire(),
-                                           auto_declare=False)
-
-    def new(self):
-        return promise(self.create_publisher)
-
-    def setup(self):
-        if self.limit:
-            for _ in xrange(self.limit):
-                self._resource.put_nowait(self.new())
-
-    def prepare(self, publisher):
-        return maybe_promise(publisher)
+    def create_producer(self):
+        conn = self.connections.acquire(block=True)
+        pub = self.app.amqp.TaskPublisher(conn, auto_declare=False)
+        conn._producer_chan = pub.channel
+        return pub
 
 
 class AMQP(object):
@@ -288,7 +286,7 @@ class AMQP(object):
         """Create new :class:`Queues` instance, using queue defaults
         from the current configuration."""
         conf = self.app.conf
-        if not queues:
+        if not queues and conf.CELERY_DEFAULT_QUEUE:
             queues = {conf.CELERY_DEFAULT_QUEUE: {
                         "exchange": conf.CELERY_DEFAULT_EXCHANGE,
                         "exchange_type": conf.CELERY_DEFAULT_EXCHANGE_TYPE,
@@ -322,13 +320,12 @@ class AMQP(object):
                     "exchange_type": default_queue["exchange_type"],
                     "routing_key": conf.CELERY_DEFAULT_ROUTING_KEY,
                     "serializer": conf.CELERY_TASK_SERIALIZER,
+                    "compression": conf.CELERY_MESSAGE_COMPRESSION,
                     "retry": conf.CELERY_TASK_PUBLISH_RETRY,
                     "retry_policy": conf.CELERY_TASK_PUBLISH_RETRY_POLICY,
-                    "app": self}
+                    "enable_utc": conf.CELERY_ENABLE_UTC,
+                    "app": self.app}
         return TaskPublisher(*args, **self.app.merge(defaults, kwargs))
-
-    def PublisherPool(self, limit=None):
-        return PublisherPool(limit=limit, app=self.app)
 
     def get_task_consumer(self, connection, queues=None, **kwargs):
         """Return consumer configured to consume from all known task
@@ -353,3 +350,7 @@ class AMQP(object):
         if self._rtable is None:
             self.flush_routes()
         return self._rtable
+
+    @cached_property
+    def publisher_pool(self):
+        return PublisherPool(self.app)

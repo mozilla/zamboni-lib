@@ -4,10 +4,12 @@
 
     Consumer utilities.
 
-    :copyright: (c) 2009 - 2011 by Ask Solem.
+    :copyright: (c) 2009 - 2012 by Ask Solem.
     :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 from itertools import count
 
 
@@ -33,7 +35,7 @@ class FairCycle(object):
                     raise self.predicate()
 
     def get(self, **kwargs):
-        for tried in count(0):
+        for tried in count(0):  # for infinity
             resource = self._next()
 
             try:
@@ -46,4 +48,5 @@ class FairCycle(object):
         pass
 
     def __repr__(self):
-        return "<FairCycle: %r>" % (self.resources, )
+        return "<FairCycle: %r/%r %r>" % (self.pos, len(self.resources),
+                                          self.resources, )

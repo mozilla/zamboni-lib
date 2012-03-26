@@ -1,12 +1,28 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.worker.state
+    ~~~~~~~~~~~~~~~~~~~
+
+    Internal worker state (global)
+
+    This includes the currently active and reserved tasks,
+    statistics, and revoked tasks.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import os
 import platform
 import shelve
 
-from kombu.utils import cached_property
+from collections import defaultdict
 
-from celery import __version__
-from celery.utils.compat import defaultdict
-from celery.datastructures import LimitedSet
+from .. import __version__
+from ..datastructures import LimitedSet
+from ..utils import cached_property
 
 #: Worker software/platform information.
 SOFTWARE_INFO = {"sw_ident": "celeryd",
@@ -20,10 +36,10 @@ REVOKES_MAX = 10000
 #: being expired when the max limit has been exceeded.
 REVOKE_EXPIRES = 3600
 
-#: set of all reserved :class:`~celery.worker.job.TaskRequest`'s.
+#: set of all reserved :class:`~celery.worker.job.Request`'s.
 reserved_requests = set()
 
-#: set of currently active :class:`~celery.worker.job.TaskRequest`'s.
+#: set of currently active :class:`~celery.worker.job.Request`'s.
 active_requests = set()
 
 #: count of tasks executed by the worker, sorted by type.
@@ -32,10 +48,8 @@ total_count = defaultdict(lambda: 0)
 #: the list of currently revoked tasks.  Persistent if statedb set.
 revoked = LimitedSet(maxlen=REVOKES_MAX, expires=REVOKE_EXPIRES)
 
-
-def task_reserved(request):
-    """Updates global state when a task has been reserved."""
-    reserved_requests.add(request)
+#: Updates global state when a task has been reserved.
+task_reserved = reserved_requests.add
 
 
 def task_accepted(request):
@@ -50,7 +64,7 @@ def task_ready(request):
     reserved_requests.discard(request)
 
 
-if os.environ.get("CELERY_BENCH"):
+if os.environ.get("CELERY_BENCH"):  # pragma: no cover
     from time import time
 
     all_count = 0
@@ -59,13 +73,13 @@ if os.environ.get("CELERY_BENCH"):
     __reserved = task_reserved
     __ready = task_ready
 
-    def task_reserved(request):
+    def task_reserved(request):  # noqa
         global bench_start
         if bench_start is None:
             bench_start = time()
         return __reserved(request)
 
-    def task_ready(request):
+    def task_ready(request):  # noqa
         global all_count, bench_start
         all_count += 1
         if not all_count % bench_every:
@@ -86,7 +100,8 @@ class Persistent(object):
         self._load()
 
     def save(self):
-        self.sync(self.db).sync()
+        self.sync(self.db)
+        self.db.sync()
         self.close()
 
     def merge(self, d):
@@ -100,7 +115,7 @@ class Persistent(object):
         return d
 
     def open(self):
-        return self.storage.open(self.filename)
+        return self.storage.open(self.filename, writeback=True)
 
     def close(self):
         if self._is_open:
@@ -109,7 +124,6 @@ class Persistent(object):
 
     def _load(self):
         self.merge(self.db)
-        self.close()
 
     @cached_property
     def db(self):

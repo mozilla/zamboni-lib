@@ -1,39 +1,199 @@
-from __future__ import generators
+from __future__ import absolute_import
 
 try:
     import unittest
     unittest.skip
+    from unittest.util import safe_repr, unorderable_list_difference
 except AttributeError:
     import unittest2 as unittest
+    from unittest2.util import safe_repr, unorderable_list_difference  # noqa
 
 import importlib
 import logging
 import os
+import re
 import sys
 import time
+import warnings
 try:
     import __builtin__ as builtins
-except ImportError:    # py3k
-    import builtins
+except ImportError:  # py3k
+    import builtins  # noqa
 
-from celery.utils.compat import StringIO, LoggerAdapter
-try:
-    from contextlib import contextmanager
-except ImportError:
-    from celery.tests.utils import fallback_contextmanager as contextmanager
+from functools import wraps
+from contextlib import contextmanager
 
-
+import mock
 from nose import SkipTest
 
-from celery.app import app_or_default
-from celery.utils.functional import wraps
+from ..app import app_or_default
+from ..utils import noop
+from ..utils.compat import WhateverIO, LoggerAdapter
+
+from .compat import catch_warnings
 
 
-class AppCase(unittest.TestCase):
+class Mock(mock.Mock):
+
+    def __init__(self, *args, **kwargs):
+        attrs = kwargs.pop("attrs", None) or {}
+        super(Mock, self).__init__(*args, **kwargs)
+        for attr_name, attr_value in attrs.items():
+            setattr(self, attr_name, attr_value)
+
+
+def skip_unless_module(module):
+
+    def _inner(fun):
+
+        @wraps(fun)
+        def __inner(*args, **kwargs):
+            try:
+                importlib.import_module(module)
+            except ImportError:
+                raise SkipTest("Does not have %s" % (module, ))
+
+            return fun(*args, **kwargs)
+
+        return __inner
+    return _inner
+
+
+# -- adds assertWarns from recent unittest2, not in Python 2.7.
+
+class _AssertRaisesBaseContext(object):
+
+    def __init__(self, expected, test_case, callable_obj=None,
+                 expected_regex=None):
+        self.expected = expected
+        self.failureException = test_case.failureException
+        self.obj_name = None
+        if isinstance(expected_regex, basestring):
+            expected_regex = re.compile(expected_regex)
+        self.expected_regex = expected_regex
+
+
+class _AssertWarnsContext(_AssertRaisesBaseContext):
+    """A context manager used to implement TestCase.assertWarns* methods."""
+
+    def __enter__(self):
+        # The __warningregistry__'s need to be in a pristine state for tests
+        # to work properly.
+        warnings.resetwarnings()
+        for v in sys.modules.values():
+            if getattr(v, '__warningregistry__', None):
+                v.__warningregistry__ = {}
+        self.warnings_manager = catch_warnings(record=True)
+        self.warnings = self.warnings_manager.__enter__()
+        warnings.simplefilter("always", self.expected)
+        return self
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.warnings_manager.__exit__(exc_type, exc_value, tb)
+        if exc_type is not None:
+            # let unexpected exceptions pass through
+            return
+        try:
+            exc_name = self.expected.__name__
+        except AttributeError:
+            exc_name = str(self.expected)
+        first_matching = None
+        for m in self.warnings:
+            w = m.message
+            if not isinstance(w, self.expected):
+                continue
+            if first_matching is None:
+                first_matching = w
+            if (self.expected_regex is not None and
+                not self.expected_regex.search(str(w))):
+                continue
+            # store warning for later retrieval
+            self.warning = w
+            self.filename = m.filename
+            self.lineno = m.lineno
+            return
+        # Now we simply try to choose a helpful failure message
+        if first_matching is not None:
+            raise self.failureException('%r does not match %r' %
+                     (self.expected_regex.pattern, str(first_matching)))
+        if self.obj_name:
+            raise self.failureException("%s not triggered by %s"
+                % (exc_name, self.obj_name))
+        else:
+            raise self.failureException("%s not triggered"
+                % exc_name)
+
+
+class Case(unittest.TestCase):
+
+    def assertWarns(self, expected_warning):
+        return _AssertWarnsContext(expected_warning, self, None)
+
+    def assertWarnsRegex(self, expected_warning, expected_regex):
+        return _AssertWarnsContext(expected_warning, self,
+                                   None, expected_regex)
+
+    def assertDictContainsSubset(self, expected, actual, msg=None):
+        missing, mismatched = [], []
+
+        for key, value in expected.iteritems():
+            if key not in actual:
+                missing.append(key)
+            elif value != actual[key]:
+                mismatched.append("%s, expected: %s, actual: %s" % (
+                    safe_repr(key), safe_repr(value),
+                    safe_repr(actual[key])))
+
+        if not (missing or mismatched):
+            return
+
+        standard_msg = ""
+        if missing:
+            standard_msg = "Missing: %s" % ','.join(map(safe_repr, missing))
+
+        if mismatched:
+            if standard_msg:
+                standard_msg += "; "
+            standard_msg += "Mismatched values: %s" % (
+                ','.join(mismatched))
+
+        self.fail(self._formatMessage(msg, standard_msg))
+
+    def assertItemsEqual(self, expected_seq, actual_seq, msg=None):
+        try:
+            expected = sorted(expected_seq)
+            actual = sorted(actual_seq)
+        except TypeError:
+            # Unsortable items (example: set(), complex(), ...)
+            expected = list(expected_seq)
+            actual = list(actual_seq)
+            missing, unexpected = unorderable_list_difference(
+                expected, actual)
+        else:
+            return self.assertSequenceEqual(expected, actual, msg=msg)
+
+        errors = []
+        if missing:
+            errors.append('Expected, but missing:\n    %s' % (
+                           safe_repr(missing)))
+        if unexpected:
+            errors.append('Unexpected, but present:\n    %s' % (
+                           safe_repr(unexpected)))
+        if errors:
+            standardMsg = '\n'.join(errors)
+            self.fail(self._formatMessage(msg, standardMsg))
+
+
+class AppCase(Case):
 
     def setUp(self):
-        from celery.app import current_app
-        self._current_app = current_app()
+        from ..app import current_app
+        from ..backends.cache import CacheBackend, DummyClient
+        app = self.app = self._current_app = current_app()
+        if isinstance(app.backend, CacheBackend):
+            if isinstance(app.backend.client, DummyClient):
+                app.backend.client.cache.clear()
+        app.backend._cache.clear()
         self.setup()
 
     def tearDown(self):
@@ -45,37 +205,6 @@ class AppCase(unittest.TestCase):
 
     def teardown(self):
         pass
-
-
-class GeneratorContextManager(object):
-    def __init__(self, gen):
-        self.gen = gen
-
-    def __enter__(self):
-        try:
-            return self.gen.next()
-        except StopIteration:
-            raise RuntimeError("generator didn't yield")
-
-    def __exit__(self, type, value, traceback):
-        if type is None:
-            try:
-                self.gen.next()
-            except StopIteration:
-                return
-            else:
-                raise RuntimeError("generator didn't stop")
-        else:
-            try:
-                self.gen.throw(type, value, traceback)
-                raise RuntimeError("generator didn't stop after throw()")
-            except StopIteration:
-                return True
-            except AttributeError:
-                raise value
-            except:
-                if sys.exc_info()[1] is not value:
-                    raise
 
 
 def get_handlers(logger):
@@ -93,40 +222,13 @@ def set_handlers(logger, new_handlers):
 @contextmanager
 def wrap_logger(logger, loglevel=logging.ERROR):
     old_handlers = get_handlers(logger)
-    sio = StringIO()
+    sio = WhateverIO()
     siohandler = logging.StreamHandler(sio)
     set_handlers(logger, [siohandler])
 
     yield sio
 
     set_handlers(logger, old_handlers)
-
-
-def fallback_contextmanager(fun):
-    def helper(*args, **kwds):
-        return GeneratorContextManager(fun(*args, **kwds))
-    return helper
-
-
-def execute_context(context, fun):
-    val = context.__enter__()
-    exc_info = (None, None, None)
-    try:
-        try:
-            return fun(val)
-        except:
-            exc_info = sys.exc_info()
-            raise
-    finally:
-        context.__exit__(*exc_info)
-
-
-try:
-    from contextlib import contextmanager
-except ImportError:
-    contextmanager = fallback_contextmanager
-
-from celery.utils import noop
 
 
 @contextmanager
@@ -282,9 +384,9 @@ def mask_modules(*modnames):
 
 @contextmanager
 def override_stdouts():
-    """Override `sys.stdout` and `sys.stderr` with `StringIO`."""
+    """Override `sys.stdout` and `sys.stderr` with `WhateverIO`."""
     prev_out, prev_err = sys.stdout, sys.stderr
-    mystdout, mystderr = StringIO(), StringIO()
+    mystdout, mystderr = WhateverIO(), WhateverIO()
     sys.stdout = sys.__stdout__ = mystdout
     sys.stderr = sys.__stderr__ = mystderr
 
@@ -309,3 +411,75 @@ def patch(module, name, mocked):
                 setattr(module, name, prev)
         return __patched
     return _patch
+
+
+@contextmanager
+def platform_pyimp(replace=None):
+    import platform
+    has_prev = hasattr(platform, "python_implementation")
+    prev = getattr(platform, "python_implementation", None)
+    if replace:
+        platform.python_implementation = replace
+    else:
+        try:
+            delattr(platform, "python_implementation")
+        except AttributeError:
+            pass
+    yield
+    if prev is not None:
+        platform.python_implementation = prev
+    if not has_prev:
+        try:
+            delattr(platform, "python_implementation")
+        except AttributeError:
+            pass
+
+
+@contextmanager
+def sys_platform(value):
+    prev, sys.platform = sys.platform, value
+    yield
+    sys.platform = prev
+
+
+@contextmanager
+def pypy_version(value=None):
+    has_prev = hasattr(sys, "pypy_version_info")
+    prev = getattr(sys, "pypy_version_info", None)
+    if value:
+        sys.pypy_version_info = value
+    else:
+        try:
+            delattr(sys, "pypy_version_info")
+        except AttributeError:
+            pass
+    yield
+    if prev is not None:
+        sys.pypy_version_info = prev
+    if not has_prev:
+        try:
+            delattr(sys, "pypy_version_info")
+        except AttributeError:
+            pass
+
+
+@contextmanager
+def reset_modules(*modules):
+    prev = dict((k, sys.modules.pop(k)) for k in modules if k in sys.modules)
+    yield
+    sys.modules.update(prev)
+
+
+@contextmanager
+def patch_modules(*modules):
+    from types import ModuleType
+
+    prev = {}
+    for mod in modules:
+        prev[mod], sys.modules[mod] = sys.modules[mod], ModuleType(mod)
+    yield
+    for name, mod in prev.iteritems():
+        if mod is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = mod

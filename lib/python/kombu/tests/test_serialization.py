@@ -1,16 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import
+from __future__ import with_statement
 
 import sys
 
-from nose import SkipTest
+from kombu.serialization import (registry, register, SerializerNotInstalled,
+                                 raw_encode, register_yaml, register_msgpack,
+                                 decode, bytes_t, pickle,
+                                 unregister, register_pickle)
 
-from kombu.serialization import registry, register, SerializerNotInstalled, \
-                                raw_encode, register_yaml, register_msgpack, \
-                                decode, bytes_type, pickle
-
-from kombu.tests.utils import unittest
-from kombu.tests.utils import mask_modules
+from .utils import TestCase
+from .utils import mask_modules, skip_if_not_module
 
 # For content_encoding tests
 unicode_string = u'abcdé\u8463'
@@ -61,15 +62,49 @@ def say(m):
     sys.stderr.write("%s\n" % (m, ))
 
 
-class test_Serialization(unittest.TestCase):
+registry.register('testS', lambda s: s, lambda s: "decoded",
+                  "application/testS", "utf-8")
+
+
+class test_Serialization(TestCase):
+
+    def test_disable(self):
+        disabled = registry._disabled_content_types
+        try:
+            registry.disable("testS")
+            self.assertIn("application/testS", disabled)
+            disabled.clear()
+
+            registry.disable("application/testS")
+            self.assertIn("application/testS", disabled)
+        finally:
+            disabled.clear()
+
+    def test_decode_when_disabled(self):
+        disabled = registry._disabled_content_types
+        try:
+            registry.disable("testS")
+
+            with self.assertRaises(SerializerNotInstalled):
+                registry.decode("xxd", "application/testS", "utf-8",
+                                force=False)
+
+            ret = registry.decode("xxd", "application/testS", "utf-8",
+                            force=True)
+            self.assertEqual(ret, "decoded")
+        finally:
+            disabled.clear()
+
+    def test_decode_when_data_is_None(self):
+        registry.decode(None, "application/testS", "utf-8")
 
     def test_content_type_decoding(self):
-        self.assertEquals(unicode_string,
+        self.assertEqual(unicode_string,
                           registry.decode(
                               unicode_string_as_utf8,
                               content_type='plain/text',
                               content_encoding='utf-8'))
-        self.assertEquals(latin_string,
+        self.assertEqual(latin_string,
                           registry.decode(
                               latin_string_as_latin1,
                               content_type='application/data',
@@ -79,9 +114,9 @@ class test_Serialization(unittest.TestCase):
         self.assertIsInstance(registry.decode(unicode_string_as_utf8,
                                               content_type='application/data',
                                               content_encoding='binary'),
-                              bytes_type)
+                              bytes_t)
 
-        self.assertEquals(unicode_string_as_utf8,
+        self.assertEqual(unicode_string_as_utf8,
                           registry.decode(
                               unicode_string_as_utf8,
                               content_type='application/data',
@@ -89,28 +124,28 @@ class test_Serialization(unittest.TestCase):
 
     def test_content_type_encoding(self):
         # Using the "raw" serializer
-        self.assertEquals(unicode_string_as_utf8,
+        self.assertEqual(unicode_string_as_utf8,
                           registry.encode(
                               unicode_string, serializer="raw")[-1])
-        self.assertEquals(latin_string_as_utf8,
+        self.assertEqual(latin_string_as_utf8,
                           registry.encode(
                               latin_string, serializer="raw")[-1])
         # And again w/o a specific serializer to check the
         # code where we force unicode objects into a string.
-        self.assertEquals(unicode_string_as_utf8,
+        self.assertEqual(unicode_string_as_utf8,
                             registry.encode(unicode_string)[-1])
-        self.assertEquals(latin_string_as_utf8,
+        self.assertEqual(latin_string_as_utf8,
                             registry.encode(latin_string)[-1])
 
     def test_json_decode(self):
-        self.assertEquals(py_data,
+        self.assertEqual(py_data,
                           registry.decode(
                               json_data,
                               content_type='application/json',
                               content_encoding='utf-8'))
 
     def test_json_encode(self):
-        self.assertEquals(registry.decode(
+        self.assertEqual(registry.decode(
                               registry.encode(py_data, serializer="json")[-1],
                               content_type='application/json',
                               content_encoding='utf-8'),
@@ -119,29 +154,19 @@ class test_Serialization(unittest.TestCase):
                               content_type='application/json',
                               content_encoding='utf-8'))
 
+    @skip_if_not_module('msgpack')
     def test_msgpack_decode(self):
         register_msgpack()
-        try:
-            __import__("msgpack")
-        except ImportError:
-            say("* msgpack-python not installed, will not execute "
-                "related tests.")
-            raise SkipTest("msgpack-python not installed")
-        self.assertEquals(msgpack_py_data,
+        self.assertEqual(msgpack_py_data,
                           registry.decode(
                               msgpack_data,
                               content_type='application/x-msgpack',
                               content_encoding='binary'))
 
+    @skip_if_not_module('msgpack')
     def test_msgpack_encode(self):
         register_msgpack()
-        try:
-            __import__("msgpack")
-        except ImportError:
-            say("* msgpack-python not installed, will not execute "
-                "related tests.")
-            raise SkipTest("msgpack-python not installed")
-        self.assertEquals(registry.decode(
+        self.assertEqual(registry.decode(
                 registry.encode(msgpack_py_data, serializer="msgpack")[-1],
                 content_type='application/x-msgpack',
                 content_encoding='binary'),
@@ -150,27 +175,19 @@ class test_Serialization(unittest.TestCase):
                     content_type='application/x-msgpack',
                     content_encoding='binary'))
 
+    @skip_if_not_module('yaml')
     def test_yaml_decode(self):
         register_yaml()
-        try:
-            __import__("yaml")
-        except ImportError:
-            say("* PyYAML not installed, will not execute related tests.")
-            raise SkipTest("PyYAML not installed")
-        self.assertEquals(py_data,
+        self.assertEqual(py_data,
                           registry.decode(
                               yaml_data,
                               content_type='application/x-yaml',
                               content_encoding='utf-8'))
 
+    @skip_if_not_module('yaml')
     def test_yaml_encode(self):
         register_yaml()
-        try:
-            __import__("yaml")
-        except ImportError:
-            say("* PyYAML not installed, will not execute related tests.")
-            raise SkipTest("PyYAML not installed")
-        self.assertEquals(registry.decode(
+        self.assertEqual(registry.decode(
                               registry.encode(py_data, serializer="yaml")[-1],
                               content_type='application/x-yaml',
                               content_encoding='utf-8'),
@@ -180,27 +197,36 @@ class test_Serialization(unittest.TestCase):
                               content_encoding='utf-8'))
 
     def test_pickle_decode(self):
-        self.assertEquals(py_data,
+        self.assertEqual(py_data,
                           registry.decode(
                               pickle_data,
                               content_type='application/x-python-serialize',
                               content_encoding='binary'))
 
     def test_pickle_encode(self):
-        self.assertEquals(pickle_data,
+        self.assertEqual(pickle_data,
                           registry.encode(py_data,
                               serializer="pickle")[-1])
 
     def test_register(self):
         register(None, None, None, None)
 
+    def test_unregister(self):
+        with self.assertRaises(SerializerNotInstalled):
+            unregister("nonexisting")
+        registry.encode("foo", serializer="pickle")
+        unregister("pickle")
+        with self.assertRaises(SerializerNotInstalled):
+            registry.encode("foo", serializer="pickle")
+        register_pickle()
+
     def test_set_default_serializer_missing(self):
-        self.assertRaises(SerializerNotInstalled,
-                          registry._set_default_serializer, "nonexisting")
+        with self.assertRaises(SerializerNotInstalled):
+            registry._set_default_serializer("nonexisting")
 
     def test_encode_missing(self):
-        self.assertRaises(SerializerNotInstalled,
-                          registry.encode, "foo", serializer="nonexisting")
+        with self.assertRaises(SerializerNotInstalled):
+            registry.encode("foo", serializer="nonexisting")
 
     def test_raw_encode(self):
         self.assertTupleEqual(raw_encode("foo".encode("utf-8")),
@@ -210,11 +236,11 @@ class test_Serialization(unittest.TestCase):
     @mask_modules("yaml")
     def test_register_yaml__no_yaml(self):
         register_yaml()
-        self.assertRaises(SerializerNotInstalled,
-                          decode, "foo", "application/x-yaml", "utf-8")
+        with self.assertRaises(SerializerNotInstalled):
+            decode("foo", "application/x-yaml", "utf-8")
 
     @mask_modules("msgpack")
     def test_register_msgpack__no_msgpack(self):
         register_msgpack()
-        self.assertRaises(SerializerNotInstalled,
-                          decode, "foo", "application/x-msgpack", "utf-8")
+        with self.assertRaises(SerializerNotInstalled):
+            decode("foo", "application/x-msgpack", "utf-8")

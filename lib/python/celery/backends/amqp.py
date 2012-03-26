@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import socket
 import threading
 import time
 
-from datetime import timedelta
 from itertools import count
 
 from kombu.entity import Exchange, Queue
 from kombu.messaging import Consumer, Producer
 
-from celery import states
-from celery.backends.base import BaseDictBackend
-from celery.exceptions import TimeoutError
-from celery.utils import timeutils
+from .. import states
+from ..exceptions import TimeoutError
+
+from .base import BaseDictBackend
 
 
 class BacklogLimitExceeded(Exception):
@@ -35,19 +37,17 @@ class AMQPBackend(BaseDictBackend):
 
     BacklogLimitExceeded = BacklogLimitExceeded
 
-    _pool = None
-    _pool_owner_pid = None
+    supports_native_join = True
 
     def __init__(self, connection=None, exchange=None, exchange_type=None,
             persistent=None, serializer=None, auto_delete=True,
-            expires=None, connection_max=None, **kwargs):
+            **kwargs):
         super(AMQPBackend, self).__init__(**kwargs)
         conf = self.app.conf
         self._connection = connection
         self.queue_arguments = {}
-        if persistent is None:
-            persistent = conf.CELERY_RESULT_PERSISTENT
-        self.persistent = persistent
+        self.persistent = (conf.CELERY_RESULT_PERSISTENT if persistent is None
+                                                         else persistent)
         delivery_mode = persistent and "persistent" or "transient"
         exchange = exchange or conf.CELERY_RESULT_EXCHANGE
         exchange_type = exchange_type or conf.CELERY_RESULT_EXCHANGE_TYPE
@@ -55,20 +55,23 @@ class AMQPBackend(BaseDictBackend):
                                       type=exchange_type,
                                       delivery_mode=delivery_mode,
                                       durable=self.persistent,
-                                      auto_delete=auto_delete)
+                                      auto_delete=False)
         self.serializer = serializer or conf.CELERY_RESULT_SERIALIZER
         self.auto_delete = auto_delete
-        self.expires = expires
-        if self.expires is None:
-            self.expires = conf.CELERY_AMQP_TASK_RESULT_EXPIRES
-        if isinstance(self.expires, timedelta):
-            self.expires = timeutils.timedelta_seconds(self.expires)
-        if self.expires is not None:
-            self.expires = int(self.expires)
-            # requires RabbitMQ 2.1.0 or higher.
-            self.queue_arguments["x-expires"] = int(self.expires * 1000.0)
-        self.connection_max = (connection_max or
-                               conf.CELERY_AMQP_TASK_RESULT_CONNECTION_MAX)
+
+        # AMQP_TASK_RESULT_EXPIRES setting is deprecated and will be
+        # removed in version 3.0.
+        dexpires = conf.CELERY_AMQP_TASK_RESULT_EXPIRES
+
+        self.expires = None
+        if "expires" in kwargs:
+            if kwargs["expires"] is not None:
+                self.expires = self.prepare_expires(kwargs["expires"])
+        else:
+            self.expires = self.prepare_expires(dexpires)
+
+        if self.expires:
+            self.queue_arguments["x-expires"] = int(self.expires * 1000)
         self.mutex = threading.Lock()
 
     def _create_binding(self, task_id):
@@ -80,9 +83,9 @@ class AMQPBackend(BaseDictBackend):
                           auto_delete=self.auto_delete,
                           queue_arguments=self.queue_arguments)
 
-    def _create_producer(self, task_id, channel):
-        self._create_binding(task_id)(channel).declare()
-        return self.Producer(channel, exchange=self.exchange,
+    def _create_producer(self, task_id, connection):
+        self._create_binding(task_id)(connection.default_channel).declare()
+        return self.Producer(connection, exchange=self.exchange,
                              routing_key=task_id.replace("-", ""),
                              serializer=self.serializer)
 
@@ -91,14 +94,7 @@ class AMQPBackend(BaseDictBackend):
 
     def _publish_result(self, connection, task_id, meta):
         # cache single channel
-        if hasattr(connection, "_result_producer_chan") and \
-                connection._result_producer_chan is not None and \
-                connection._result_producer_chan.connection is not None:
-            channel = connection._result_producer_chan
-        else:
-            channel = connection._result_producer_chan = connection.channel()
-
-        self._create_producer(task_id, channel).publish(meta)
+        self._create_producer(task_id, connection).publish(meta)
 
     def revive(self, channel):
         pass
@@ -107,13 +103,10 @@ class AMQPBackend(BaseDictBackend):
             max_retries=20, interval_start=0, interval_step=1,
             interval_max=1):
         """Send task return value and status."""
-        self.mutex.acquire()
-        try:
-            conn = self.pool.acquire(block=True)
-            try:
+        with self.mutex:
+            with self.app.pool.acquire(block=True) as conn:
 
                 def errback(error, delay):
-                    conn._result_producer_chan = None
                     print("Couldn't send result for %r: %r. Retry in %rs." % (
                             task_id, error, delay))
 
@@ -126,11 +119,6 @@ class AMQPBackend(BaseDictBackend):
                 send(conn, task_id, {"task_id": task_id, "status": status,
                                 "result": self.encode_result(result, status),
                                 "traceback": traceback})
-            finally:
-                conn.release()
-        finally:
-            self.mutex.release()
-
         return result
 
     def get_task_meta(self, task_id, cache=True):
@@ -159,9 +147,7 @@ class AMQPBackend(BaseDictBackend):
             return self.wait_for(task_id, timeout, cache)
 
     def poll(self, task_id, backlog_limit=100):
-        conn = self.pool.acquire(block=True)
-        channel = conn.channel()
-        try:
+        with self.app.pool.acquire_channel(block=True) as (_, channel):
             binding = self._create_binding(task_id)(channel)
             binding.declare()
             latest, acc = None, None
@@ -177,9 +163,6 @@ class AMQPBackend(BaseDictBackend):
             elif task_id in self._cache:  # use previously received state.
                 return self._cache[task_id]
             return {"status": states.PENDING, "result": None}
-        finally:
-            channel.close()
-            conn.release()
 
     def drain_events(self, connection, consumer, timeout=None, now=time.time):
         wait = connection.drain_events
@@ -189,9 +172,10 @@ class AMQPBackend(BaseDictBackend):
             if meta["status"] in states.READY_STATES:
                 uuid = repair_uuid(message.delivery_info["routing_key"])
                 results[uuid] = meta
-        consumer.register_callback(callback)
 
+        consumer.callbacks[:] = [callback]
         time_start = now()
+
         while 1:
             # Total time spent may exceed a single call to wait()
             if timeout and now() - time_start >= timeout:
@@ -203,24 +187,13 @@ class AMQPBackend(BaseDictBackend):
         return results
 
     def consume(self, task_id, timeout=None):
-        conn = self.pool.acquire(block=True)
-        channel = conn.channel()
-        try:
+        with self.app.pool.acquire_channel(block=True) as (conn, channel):
             binding = self._create_binding(task_id)
-            consumer = self._create_consumer(binding, channel)
-            consumer.consume()
-            try:
+            with self._create_consumer(binding, channel) as consumer:
                 return self.drain_events(conn, consumer, timeout).values()[0]
-            finally:
-                consumer.cancel()
-        finally:
-            channel.close()
-            conn.release()
 
-    def get_many(self, task_ids, timeout=None):
-        conn = self.pool.acquire(block=True)
-        channel = conn.channel()
-        try:
+    def get_many(self, task_ids, timeout=None, **kwargs):
+        with self.app.pool.acquire_channel(block=True) as (conn, channel):
             ids = set(task_ids)
             cached_ids = set()
             for task_id in ids:
@@ -232,28 +205,15 @@ class AMQPBackend(BaseDictBackend):
                     if cached["status"] in states.READY_STATES:
                         yield task_id, cached
                         cached_ids.add(task_id)
-            ids ^= cached_ids
 
+            ids ^= cached_ids
             bindings = [self._create_binding(task_id) for task_id in task_ids]
-            consumer = self._create_consumer(bindings, channel)
-            consumer.consume()
-            try:
+            with self._create_consumer(bindings, channel) as consumer:
                 while ids:
                     r = self.drain_events(conn, consumer, timeout)
-                    ids ^= set(r.keys())
-                    for ready_id, ready_meta in r.items():
+                    ids ^= set(r)
+                    for ready_id, ready_meta in r.iteritems():
                         yield ready_id, ready_meta
-            except:   # ☹ Py2.4 — Cannot yield inside try: finally: block
-                consumer.cancel()
-                raise
-            consumer.cancel()
-
-        except:  # … ☹
-            channel.close()
-            conn.release()
-            raise
-        channel.close()
-        conn.release()
 
     def reload_task_result(self, task_id):
         raise NotImplementedError(
@@ -265,27 +225,24 @@ class AMQPBackend(BaseDictBackend):
                 "reload_taskset_result is not supported by this backend.")
 
     def save_taskset(self, taskset_id, result):
-        """Store the result and status of a task."""
         raise NotImplementedError(
                 "save_taskset is not supported by this backend.")
 
     def restore_taskset(self, taskset_id, cache=True):
-        """Get the result of a taskset."""
         raise NotImplementedError(
                 "restore_taskset is not supported by this backend.")
 
-    def _reset_after_fork(self, *args):
-        if self._pool:
-            self._pool.force_close_all()
-            self._pool = None
+    def delete_taskset(self, taskset_id):
+        raise NotImplementedError(
+                "delete_taskset is not supported by this backend.")
 
-    @property
-    def pool(self):
-        if self._pool is None:
-            self._pool = self.app.broker_connection().Pool(self.connection_max)
-            try:
-                from multiprocessing.util import register_after_fork
-                register_after_fork(self, self._reset_after_fork)
-            except ImportError:
-                pass
-        return self._pool
+    def __reduce__(self, args=(), kwargs={}):
+        kwargs.update(
+            dict(connection=self._connection,
+                 exchange=self.exchange.name,
+                 exchange_type=self.exchange.type,
+                 persistent=self.persistent,
+                 serializer=self.serializer,
+                 auto_delete=self.auto_delete,
+                 expires=self.expires))
+        return super(AMQPBackend, self).__reduce__(args, kwargs)

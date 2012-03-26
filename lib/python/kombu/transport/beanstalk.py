@@ -4,18 +4,20 @@ kombu.transport.beanstalk
 
 Beanstalk transport.
 
-:copyright: (c) 2010 - 2011 by David Ziegler.
+:copyright: (c) 2010 - 2012 by David Ziegler.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 import socket
 
 from Queue import Empty
 
-from anyjson import serialize, deserialize
+from anyjson import loads, dumps
 from beanstalkc import Connection, BeanstalkcException, SocketError
 
-from kombu.transport import virtual
+from . import virtual
 
 DEFAULT_PORT = 11300
 
@@ -29,7 +31,7 @@ class Channel(virtual.Channel):
         item, dest = None, None
         if job:
             try:
-                item = deserialize(job.body)
+                item = loads(job.body)
                 dest = job.stats()["tube"]
             except Exception:
                 job.bury()
@@ -42,7 +44,7 @@ class Channel(virtual.Channel):
     def _put(self, queue, message, **kwargs):
         priority = message["properties"]["delivery_info"]["priority"]
         self.client.use(queue)
-        self.client.put(serialize(message), priority=priority)
+        self.client.put(dumps(message), priority=priority)
 
     def _get(self, queue):
         if queue not in self.client.watching():
@@ -112,7 +114,7 @@ class Channel(virtual.Channel):
 class Transport(virtual.Transport):
     Channel = Channel
 
-    interval = 1
+    polling_interval = 1
     default_port = DEFAULT_PORT
     connection_errors = (socket.error,
                          SocketError,

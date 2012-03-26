@@ -1,5 +1,19 @@
-from celery.exceptions import QueueNotFound
-from celery.utils import firstmethod, instantiate, lpmerge, mpromise
+# -*- coding: utf-8 -*-
+"""
+    celery.routes
+    ~~~~~~~~~~~~~
+
+    Contains utilities for working with task routes
+    (:setting:`CELERY_ROUTES`).
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
+from .exceptions import QueueNotFound
+from .utils import firstmethod, instantiate, lpmerge, mpromise
 
 _first_route = firstmethod("route_for_task")
 
@@ -20,14 +34,10 @@ class Router(object):
 
     def __init__(self, routes=None, queues=None, create_missing=False,
             app=None):
-        from celery.app import app_or_default
+        from .app import app_or_default
         self.app = app_or_default(app)
-        if queues is None:
-            queues = {}
-        if routes is None:
-            routes = []
-        self.queues = queues
-        self.routes = routes
+        self.queues = {} if queues is None else queues
+        self.routes = [] if routes is None else routes
         self.create_missing = create_missing
 
     def route(self, options, task, args=(), kwargs={}):
@@ -57,7 +67,10 @@ class Router(object):
                 if not self.create_missing:
                     raise QueueNotFound(
                         "Queue %r is not defined in CELERY_QUEUES" % queue)
-                dest = dict(self.app.amqp.queues.add(queue, queue, queue))
+                for key in "exchange", "routing_key":
+                    if route.get(key) is None:
+                        route[key] = queue
+                dest = dict(self.app.amqp.queues.add(queue, **route))
             # needs to be declared by publisher
             dest["queue"] = queue
             # routing_key and binding_key are synonyms.

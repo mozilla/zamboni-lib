@@ -1,6 +1,21 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.task.control
+    ~~~~~~~~~~~~~~~~~~~
+
+    Client for worker remote control commands.
+    Server implementation is in :mod:`celery.worker.control`.
+
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+from __future__ import with_statement
+
 from kombu.pidbox import Mailbox
 
-from celery.app import app_or_default
+from ..app import app_or_default
 
 
 def flatten_reply(reply):
@@ -49,7 +64,7 @@ class Inspect(object):
     def revoked(self):
         return self._request("dump_revoked")
 
-    def registered_tasks(self):
+    def registered(self):
         return self._request("dump_tasks")
 
     def enable_events(self):
@@ -73,6 +88,8 @@ class Inspect(object):
     def active_queues(self):
         return self._request("active_queues")
 
+    registered_tasks = registered
+
 
 class Control(object):
     Mailbox = Mailbox
@@ -94,16 +111,9 @@ class Control(object):
         :returns: the number of tasks discarded.
 
         """
-
-        def _do_discard(connection=None, connect_timeout=None):
-            consumer = self.app.amqp.get_task_consumer(connection=connection)
-            try:
-                return consumer.discard_all()
-            finally:
-                consumer.close()
-
-        return self.app.with_default_connection(_do_discard)(
-                connection=connection, connect_timeout=connect_timeout)
+        with self.app.default_connection(connection, connect_timeout) as conn:
+            return self.app.amqp.get_task_consumer(connection=conn)\
+                                .discard_all()
 
     def revoke(self, task_id, destination=None, terminate=False,
             signal="SIGTERM", **kwargs):
@@ -155,7 +165,7 @@ class Control(object):
     def rate_limit(self, task_name, rate_limit, destination=None, **kwargs):
         """Set rate limit for task by type.
 
-        :param task_name: Type of task to change rate limit for.
+        :param task_name: Name of task to change rate limit for.
         :param rate_limit: The rate limit as tasks per second, or a rate limit
             string (`"100/m"`, etc.
             see :attr:`celery.task.base.Task.rate_limit` for
@@ -174,6 +184,21 @@ class Control(object):
         return self.broadcast("rate_limit", destination=destination,
                               arguments={"task_name": task_name,
                                          "rate_limit": rate_limit},
+                              **kwargs)
+
+    def time_limit(self, task_name, soft=None, hard=None, **kwargs):
+        """Set time limits for task by type.
+
+        :param task_name: Name of task to change time limits for.
+        :keyword soft: New soft time limit (in seconds).
+        :keyword hard: New hard time limit (in seconds).
+
+        Any additional keyword arguments are passed on to :meth:`broadcast`.
+
+        """
+        return self.broadcast("time_limit",
+                              arguments={"task_name": task_name,
+                                         "hard": hard, "soft": soft},
                               **kwargs)
 
     def broadcast(self, command, arguments=None, destination=None,
@@ -196,24 +221,19 @@ class Control(object):
             received.
 
         """
-        def _do_broadcast(connection=None, connect_timeout=None,
-                          channel=None):
-            return self.mailbox(connection)._broadcast(command, arguments,
-                                                       destination, reply,
-                                                       timeout, limit,
-                                                       callback,
-                                                       channel=channel)
-
-        if channel:
-            return _do_broadcast(connection, connect_timeout, channel)
-        else:
-            return self.app.with_default_connection(_do_broadcast)(
-                    connection=connection, connect_timeout=connect_timeout)
+        with self.app.default_connection(connection, connect_timeout) as conn:
+            if channel is None:
+                channel = conn.default_channel
+            return self.mailbox(conn)._broadcast(command, arguments,
+                                                 destination, reply, timeout,
+                                                 limit, callback,
+                                                 channel=channel)
 
 
 _default_control = Control(app_or_default())
 broadcast = _default_control.broadcast
 rate_limit = _default_control.rate_limit
+time_limit = _default_control.time_limit
 ping = _default_control.ping
 revoke = _default_control.revoke
 discard_all = _default_control.discard_all

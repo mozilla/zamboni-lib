@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-"
+from __future__ import absolute_import
+
 import threading
 
-from celery.tests.utils import unittest
-
 from celery.task.base import Context
+from celery.tests.utils import Case
 
 
 # Retreive the values of all context attributes as a
@@ -36,7 +37,7 @@ class ContextManipulator(threading.Thread):
         self.result = get_context_as_dict(self.ctx)
 
 
-class TestTaskContext(unittest.TestCase):
+class TestTaskContext(Case):
 
     def test_default_context(self):
         # A bit of a tautological test, since it uses the same

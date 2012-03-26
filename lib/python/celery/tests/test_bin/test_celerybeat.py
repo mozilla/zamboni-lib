@@ -1,5 +1,10 @@
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import logging
 import sys
+
+from collections import defaultdict
 
 from kombu.tests.utils import redirect_stdouts
 
@@ -8,7 +13,6 @@ from celery import platforms
 from celery.app import app_or_default
 from celery.bin import celerybeat as celerybeat_bin
 from celery.apps import beat as beatapp
-from celery.utils.compat import defaultdict
 
 from celery.tests.utils import AppCase
 
@@ -80,32 +84,39 @@ class test_Beat(AppCase):
     def psig(self, fun, *args, **kwargs):
         handlers = {}
 
-        def i(sig, handler):
-            handlers[sig] = handler
+        class Signals(platforms.Signals):
 
-        p, platforms.install_signal_handler = \
-                platforms.install_signal_handler, i
+            def __setitem__(self, sig, handler):
+                handlers[sig] = handler
+
+        p, platforms.signals = platforms.signals, Signals()
         try:
             fun(*args, **kwargs)
             return handlers
         finally:
-            platforms.install_signal_handler = p
+            platforms.signals = p
 
     def test_install_sync_handler(self):
         b = beatapp.Beat()
         clock = MockService()
         MockService.in_sync = False
         handlers = self.psig(b.install_sync_handler, clock)
-        self.assertRaises(SystemExit, handlers["SIGINT"],
-                          "SIGINT", object())
+        with self.assertRaises(SystemExit):
+            handlers["SIGINT"]("SIGINT", object())
         self.assertTrue(MockService.in_sync)
         MockService.in_sync = False
 
     def test_setup_logging(self):
+        try:
+            # py3k
+            delattr(sys.stdout, "logger")
+        except AttributeError:
+            pass
         b = beatapp.Beat()
         b.redirect_stdouts = False
         b.setup_logging()
-        self.assertRaises(AttributeError, getattr, sys.stdout, "logger")
+        with self.assertRaises(AttributeError):
+            sys.stdout.logger
 
     @redirect_stdouts
     def test_logs_errors(self, stdout, stderr):
@@ -158,24 +169,25 @@ class MockDaemonContext(object):
     opened = False
     closed = False
 
+    def __init__(self, *args, **kwargs):
+        pass
+
     def open(self):
         self.__class__.opened = True
+        return self
+    __enter__ = open
 
-    def close(self):
+    def close(self, *args):
         self.__class__.closed = True
-
-
-def create_daemon_context(*args, **kwargs):
-    context = MockDaemonContext()
-    return context, context.close
+    __exit__ = close
 
 
 class test_div(AppCase):
 
     def setup(self):
         self.prev, beatapp.Beat = beatapp.Beat, MockBeat
-        self.ctx, celerybeat_bin.create_daemon_context = \
-                celerybeat_bin.create_daemon_context, create_daemon_context
+        self.ctx, celerybeat_bin.detached = \
+                celerybeat_bin.detached, MockDaemonContext
 
     def teardown(self):
         beatapp.Beat = self.prev

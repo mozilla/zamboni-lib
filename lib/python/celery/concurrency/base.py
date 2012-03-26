@@ -1,16 +1,17 @@
-import os
-import sys
-import time
-import traceback
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import
 
-from celery import log
-from celery.datastructures import ExceptionInfo
-from celery.utils.functional import partial
-from celery.utils import timer2
+import logging
+import os
+import time
+
+from .. import log
+from ..utils import timer2
+from ..utils.encoding import safe_repr
 
 
 def apply_target(target, args=(), kwargs={}, callback=None,
-        accept_callback=None, pid=None):
+        accept_callback=None, pid=None, **_):
     if accept_callback:
         accept_callback(pid or os.getpid(), time.time())
     callback(target(*args, **kwargs))
@@ -23,7 +24,20 @@ class BasePool(object):
 
     Timer = timer2.Timer
 
+    #: set to true if the pool can be shutdown from within
+    #: a signal handler.
     signal_safe = True
+
+    #: set to true if pool supports rate limits.
+    #: (this is here for gevent, which currently does not implement
+    #: the necessary timers).
+    rlimit_safe = True
+
+    #: set to true if pool requires the use of a mediator
+    #: thread (e.g. if applying new items can block the current thread).
+    requires_mediator = False
+
+    #: set to true if pool uses greenlets.
     is_green = False
 
     _state = None
@@ -34,6 +48,7 @@ class BasePool(object):
         self.putlocks = putlocks
         self.logger = logger or log.get_default_logger()
         self.options = options
+        self._does_debug = self.logger.isEnabledFor(logging.DEBUG)
 
     def on_start(self):
         pass
@@ -51,6 +66,10 @@ class BasePool(object):
         raise NotImplementedError(
                 "%s does not implement kill_job" % (self.__class__, ))
 
+    def restart(self):
+        raise NotImplementedError(
+                "%s does not implement restart" % (self.__class__, ))
+
     def stop(self):
         self._state = self.CLOSE
         self.on_stop()
@@ -64,58 +83,20 @@ class BasePool(object):
         self.on_start()
         self._state = self.RUN
 
-    def apply_async(self, target, args=None, kwargs=None, callbacks=None,
-            errbacks=None, accept_callback=None, timeout_callback=None,
-            **compat):
+    def apply_async(self, target, args=[], kwargs={}, **options):
         """Equivalent of the :func:`apply` built-in function.
 
-        All `callbacks` and `errbacks` should complete immediately since
+        Callbacks should optimally return as soon as possible since
         otherwise the thread which handles the result will get blocked.
 
         """
-        args = args or []
-        kwargs = kwargs or {}
-        callbacks = callbacks or []
-        errbacks = errbacks or []
-
-        on_ready = partial(self.on_ready, callbacks, errbacks)
-        on_worker_error = partial(self.on_worker_error, errbacks)
-
-        self.logger.debug("TaskPool: Apply %s (args:%s kwargs:%s)" % (
-            target, args, kwargs))
+        if self._does_debug:
+            self.logger.debug("TaskPool: Apply %s (args:%s kwargs:%s)",
+                            target, safe_repr(args), safe_repr(kwargs))
 
         return self.on_apply(target, args, kwargs,
-                             callback=on_ready,
-                             accept_callback=accept_callback,
-                             timeout_callback=timeout_callback,
-                             error_callback=on_worker_error,
-                             waitforslot=self.putlocks)
-
-    def on_ready(self, callbacks, errbacks, ret_value):
-        """What to do when a worker task is ready and its return value has
-        been collected."""
-
-        if isinstance(ret_value, ExceptionInfo):
-            if isinstance(ret_value.exception, (
-                    SystemExit, KeyboardInterrupt)):
-                raise ret_value.exception
-            [self.safe_apply_callback(errback, ret_value)
-                    for errback in errbacks]
-        else:
-            [self.safe_apply_callback(callback, ret_value)
-                    for callback in callbacks]
-
-    def on_worker_error(self, errbacks, exc):
-        einfo = ExceptionInfo((exc.__class__, exc, None))
-        [errback(einfo) for errback in errbacks]
-
-    def safe_apply_callback(self, fun, *args):
-        try:
-            fun(*args)
-        except:
-            self.logger.error("Pool callback raised exception: %s" % (
-                traceback.format_exc(), ),
-                exc_info=sys.exc_info())
+                             waitforslot=self.putlocks,
+                             **options)
 
     def _get_info(self):
         return {}
@@ -127,3 +108,7 @@ class BasePool(object):
     @property
     def active(self):
         return self._state == self.RUN
+
+    @property
+    def num_processes(self):
+        return self.limit

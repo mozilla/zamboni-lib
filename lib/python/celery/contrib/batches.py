@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 celery.contrib.batches
 ======================
@@ -35,27 +36,54 @@ Registering the click is done as follows:
     In the future we hope to add the ability to direct batching tasks
     to a channel with different QoS requirements than the task channel.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 from itertools import count
-from Queue import Queue
+from Queue import Empty, Queue
 
-from kombu.utils import cached_property
-
-from celery.datastructures import consume_queue
 from celery.task import Task
-from celery.utils import timer2
+from celery.utils import cached_property, timer2
 from celery.worker import state
+
+
+def consume_queue(queue):
+    """Iterator yielding all immediately available items in a
+    :class:`Queue.Queue`.
+
+    The iterator stops as soon as the queue raises :exc:`Queue.Empty`.
+
+    *Examples*
+
+        >>> q = Queue()
+        >>> map(q.put, range(4))
+        >>> list(consume_queue(q))
+        [0, 1, 2, 3]
+        >>> list(consume_queue(q))
+        []
+
+    """
+    get = queue.get_nowait
+    while 1:
+        try:
+            yield get()
+        except Empty:
+            break
 
 
 def apply_batches_task(task, args, loglevel, logfile):
     task.request.update({"loglevel": loglevel, "logfile": logfile})
     try:
-        return task(*args)
+        result = task(*args)
+    except Exception, exp:
+        result = None
+        task.logger.error("There was an Exception: %s", exp, exc_info=True)
     finally:
         task.request.clear()
+    return result
 
 
 class SimpleRequest(object):
@@ -138,7 +166,7 @@ class Batches(Task):
         if self._buffer.qsize():
             requests = list(consume_queue(self._buffer))
             if requests:
-                self.debug("Buffer complete: %s" % (len(requests), ))
+                self.debug("Buffer complete: %s", len(requests))
                 self.flush(requests)
         if not requests:
             self.debug("Cancelling timer: Nothing in buffer.")
@@ -160,10 +188,10 @@ class Batches(Task):
         return self._pool.apply_async(apply_batches_task,
                     (self, args, loglevel, logfile),
                     accept_callback=on_accepted,
-                    callbacks=acks_late[True] and [on_return] or [])
+                    callback=acks_late[True] and on_return or None)
 
     def debug(self, msg):
-        self.logger.debug("%s: %s" % (self.name, msg))
+        self.logger.debug("%s: %s", self.name, msg)
 
     @cached_property
     def logger(self):

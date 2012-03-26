@@ -1,16 +1,21 @@
-from kombu.tests.utils import unittest
+from __future__ import absolute_import
+from __future__ import with_statement
 
+from kombu import BrokerConnection
 from kombu.transport.virtual import exchange
 
-from kombu.tests.mocks import Channel
+from .mocks import Transport
+from .utils import TestCase
+from .utils import Mock
 
 
-class ExchangeCase(unittest.TestCase):
+class ExchangeCase(TestCase):
     type = None
 
     def setUp(self):
         if self.type:
-            self.e = self.type(Channel())
+            self.e = self.type(BrokerConnection(transport=Transport)
+                                               .channel())
 
 
 class test_Direct(ExchangeCase):
@@ -26,7 +31,7 @@ class test_Direct(ExchangeCase):
                 ["qFoo", "qFox"])
         self.assertListEqual(self.e.lookup(
                 self.table, "eMoz", "rMoz", "DEFAULT"),
-                ["DEFAULT"])
+                [])
         self.assertListEqual(self.e.lookup(
                 self.table, "eBar", "rBar", None),
                 ["qBar"])
@@ -42,6 +47,21 @@ class test_Fanout(ExchangeCase):
         self.assertListEqual(self.e.lookup(
                 self.table, "eFoo", "rFoo", None),
                 ["qFoo", "qFox", "qBar"])
+
+    def test_deliver_when_fanout_supported(self):
+        self.e.channel = Mock()
+        self.e.channel.supports_fanout = True
+        message = Mock()
+
+        self.e.deliver(message, "exchange", None)
+        self.e.channel._put_fanout.assert_called_with("exchange", message)
+
+    def test_deliver_when_fanout_unsupported(self):
+        self.e.channel = Mock()
+        self.e.channel.supports_fanout = False
+
+        self.e.deliver(Mock(), "exchange", None)
+        self.assertFalse(self.e.channel._put_fanout.called)
 
 
 class test_Topic(ExchangeCase):
@@ -68,18 +88,28 @@ class test_Topic(ExchangeCase):
                 ["rFoo"])
         self.assertListEqual(self.e.lookup(
                 self.table, "eFoo", "stockxeuropexOSE", None),
-                [None])
+                [])
         self.assertListEqual(self.e.lookup(
                 self.table, "eFoo", "candy.schleckpulver.snap_crackle", None),
-                [None])
+                [])
+
+    def test_deliver(self):
+        self.e.channel = Mock()
+        self.e.channel._lookup.return_value = ("a", "b")
+        message = Mock()
+        self.e.deliver(message, "exchange", "rkey")
+
+        expected = [(("a", message), {}),
+                    (("b", message), {})]
+        self.assertListEqual(self.e.channel._put.call_args_list, expected)
 
 
 class test_ExchangeType(ExchangeCase):
     type = exchange.ExchangeType
 
     def test_lookup(self):
-        self.assertRaises(NotImplementedError, self.e.lookup,
-                [], "eFoo", "rFoo", None)
+        with self.assertRaises(NotImplementedError):
+            self.e.lookup([], "eFoo", "rFoo", None)
 
     def test_prepare_bind(self):
         self.assertTupleEqual(self.e.prepare_bind("qFoo", "eFoo", "rFoo", {}),

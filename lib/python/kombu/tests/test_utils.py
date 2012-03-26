@@ -1,6 +1,9 @@
+from __future__ import absolute_import
+
 import pickle
 import sys
-from kombu.tests.utils import unittest
+
+from functools import wraps
 
 if sys.version_info >= (3, 0):
     from io import StringIO, BytesIO
@@ -8,12 +11,9 @@ else:
     from StringIO import StringIO, StringIO as BytesIO  # noqa
 
 from kombu import utils
-from kombu.utils.functional import wraps
 
-from kombu.tests.utils import redirect_stdouts, mask_modules
-
-partition = utils._compat_partition
-rpartition = utils._compat_rpartition
+from .utils import redirect_stdouts, mask_modules, skip_if_module
+from .utils import TestCase
 
 
 class OldString(object):
@@ -31,79 +31,56 @@ class OldString(object):
         return self.value.rsplit(*args, **kwargs)
 
 
-class test_utils(unittest.TestCase):
+class test_utils(TestCase):
 
     def test_maybe_list(self):
         self.assertEqual(utils.maybe_list(None), [])
         self.assertEqual(utils.maybe_list(1), [1])
         self.assertEqual(utils.maybe_list([1, 2, 3]), [1, 2, 3])
 
-    def assert_partition(self, p, t=str):
-        self.assertEqual(p(t("foo.bar.baz"), "."),
-                ("foo", ".", "bar.baz"))
-        self.assertEqual(p(t("foo"), "."),
-                ("foo", "", ""))
-        self.assertEqual(p(t("foo."), "."),
-                ("foo", ".", ""))
-        self.assertEqual(p(t(".bar"), "."),
-                ("", ".", "bar"))
-        self.assertEqual(p(t("."), "."),
-                ('', ".", ''))
+    def test_fxrange_no_repeatlast(self):
+        self.assertEqual(list(utils.fxrange(1.0, 3.0, 1.0)),
+                         [1.0, 2.0, 3.0])
 
-    def assert_rpartition(self, p, t=str):
-        self.assertEqual(p(t("foo.bar.baz"), "."),
-                ("foo.bar", ".", "baz"))
-        self.assertEqual(p(t("foo"), "."),
-                ("", "", "foo"))
-        self.assertEqual(p(t("foo."), "."),
-                ("foo", ".", ""))
-        self.assertEqual(p(t(".bar"), "."),
-                ("", ".", "bar"))
-        self.assertEqual(p(t("."), "."),
-                ('', ".", ''))
+    def test_fxrangemax(self):
+        self.assertEqual(list(utils.fxrangemax(1.0, 3.0, 1.0, 30.0)),
+                         [1.0, 2.0, 3.0, 3.0, 3.0, 3.0,
+                          3.0, 3.0, 3.0, 3.0, 3.0])
+        self.assertEqual(list(utils.fxrangemax(1.0, None, 1.0, 30.0)),
+                         [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
 
-    def test_compat_partition(self):
-        self.assert_partition(partition)
+    def test_reprkwargs(self):
+        self.assertTrue(utils.reprkwargs({"foo": "bar", 1: 2, u"k": "v"}))
 
-    def test_compat_rpartition(self):
-        self.assert_rpartition(rpartition)
-
-    def test_partition(self):
-        self.assert_partition(utils.partition)
-
-    def test_rpartition(self):
-        self.assert_rpartition(utils.rpartition)
-
-    def test_partition_oldstr(self):
-        self.assert_partition(utils.partition, OldString)
-
-    def test_rpartition_oldstr(self):
-        self.assert_rpartition(utils.rpartition, OldString)
+    def test_reprcall(self):
+        self.assertTrue(utils.reprcall("add",
+            (2, 2), {"copy": True}))
 
 
-class test_UUID(unittest.TestCase):
+class test_UUID(TestCase):
 
     def test_uuid4(self):
         self.assertNotEqual(utils.uuid4(),
                             utils.uuid4())
 
-    def test_gen_unique_id(self):
-        i1 = utils.gen_unique_id()
-        i2 = utils.gen_unique_id()
+    def test_uuid(self):
+        i1 = utils.uuid()
+        i2 = utils.uuid()
         self.assertIsInstance(i1, str)
         self.assertNotEqual(i1, i2)
 
-    def test_gen_unique_id_without_ctypes(self):
+    @skip_if_module('__pypy__')
+    def test_uuid_without_ctypes(self):
         old_utils = sys.modules.pop("kombu.utils")
 
         @mask_modules("ctypes")
         def with_ctypes_masked():
-            from kombu.utils import ctypes, gen_unique_id
+            from ..utils import ctypes, uuid
 
             self.assertIsNone(ctypes)
-            uuid = gen_unique_id()
-            self.assertTrue(uuid)
-            self.assertIsInstance(uuid, basestring)
+            tid = uuid()
+            self.assertTrue(tid)
+            self.assertIsInstance(tid, basestring)
 
         try:
             with_ctypes_masked()
@@ -111,7 +88,7 @@ class test_UUID(unittest.TestCase):
             sys.modules["celery.utils"] = old_utils
 
 
-class test_Misc(unittest.TestCase):
+class test_Misc(TestCase):
 
     def test_kwdict(self):
 
@@ -135,7 +112,7 @@ class MyBytesIO(BytesIO):
         pass
 
 
-class test_emergency_dump_state(unittest.TestCase):
+class test_emergency_dump_state(TestCase):
 
     @redirect_stdouts
     def test_dump(self, stdout, stderr):
@@ -160,17 +137,12 @@ class test_emergency_dump_state(unittest.TestCase):
         self.assertFalse(stdout.getvalue())
 
 
-_tried_to_sleep = [None]
-
-
 def insomnia(fun):
 
     @wraps(fun)
     def _inner(*args, **kwargs):
-        _tried_to_sleep[0] = None
-
         def mysleep(i):
-            _tried_to_sleep[0] = i
+            pass
 
         prev_sleep = utils.sleep
         utils.sleep = mysleep
@@ -182,39 +154,75 @@ def insomnia(fun):
     return _inner
 
 
-class test_retry_over_time(unittest.TestCase):
+class test_retry_over_time(TestCase):
+
+    def setUp(self):
+        self.index = 0
+
+    class Predicate(Exception):
+        pass
+
+    def myfun(self):
+        if self.index < 9:
+            raise self.Predicate()
+        return 42
+
+    def errback(self, exc, interval):
+        sleepvals = (None, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 16.0)
+        self.index += 1
+        self.assertEqual(interval, sleepvals[self.index])
 
     @insomnia
     def test_simple(self):
-        index = [0]
-
-        class Predicate(Exception):
-            pass
-
-        def myfun():
-            sleepvals = {0: None,
-                         1: 2.0,
-                         2: 4.0,
-                         3: 6.0,
-                         4: 8.0,
-                         5: 10.0,
-                         6: 12.0,
-                         7: 14.0,
-                         8: 16.0,
-                         9: 16.0}
-            self.assertEqual(_tried_to_sleep[0], sleepvals[index[0]])
-            if index[0] < 9:
-                raise Predicate()
-            return 42
-
-        def errback(exc, interval):
-            index[0] += 1
-
-        x = utils.retry_over_time(myfun, Predicate, errback=errback,
-                                                    interval_max=14)
+        x = utils.retry_over_time(self.myfun, self.Predicate,
+                errback=self.errback, interval_max=14)
         self.assertEqual(x, 42)
-        _tried_to_sleep[0] = None
-        index[0] = 0
-        self.assertRaises(Predicate,
-                          utils.retry_over_time, myfun, Predicate,
-                          max_retries=1, errback=errback, interval_max=14)
+        self.assertEqual(self.index, 9)
+
+    @insomnia
+    def test_retry_once(self):
+        self.assertRaises(self.Predicate, utils.retry_over_time,
+                self.myfun, self.Predicate,
+                max_retries=1, errback=self.errback, interval_max=14)
+        self.assertEqual(self.index, 2)
+        # no errback
+        self.assertRaises(self.Predicate, utils.retry_over_time,
+                self.myfun, self.Predicate,
+                max_retries=1, errback=None, interval_max=14)
+
+    @insomnia
+    def test_retry_never(self):
+        self.assertRaises(self.Predicate, utils.retry_over_time,
+                self.myfun, self.Predicate,
+                max_retries=0, errback=self.errback, interval_max=14)
+        self.assertEqual(self.index, 1)
+
+
+class test_cached_property(TestCase):
+
+    def test_when_access_from_class(self):
+
+        class X(object):
+            xx = None
+
+            @utils.cached_property
+            def foo(self):
+                return 42
+
+            @foo.setter  # noqa
+            def foo(self, value):
+                self.xx = 10
+
+        desc = X.__dict__["foo"]
+        self.assertIs(X.foo, desc)
+
+        self.assertIs(desc.__get__(None), desc)
+        self.assertIs(desc.__set__(None, 1), desc)
+        self.assertIs(desc.__delete__(None), desc)
+        self.assertTrue(desc.setter(1))
+
+        x = X()
+        x.foo = 30
+        self.assertEqual(x.xx, 10)
+
+        del(x.foo)

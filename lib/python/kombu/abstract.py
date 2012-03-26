@@ -4,17 +4,21 @@ kombu.compression
 
 Object utilities.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
 from copy import copy
 
-from kombu.exceptions import NotBoundError
+from .exceptions import NotBoundError
+
+__all__ = ["Object", "MaybeChannelBound"]
 
 
 class Object(object):
-    """Common baseclass supporting automatic kwargs->attributes handling,
+    """Common base class supporting automatic kwargs->attributes handling,
     and cloning."""
     attrs = ()
 
@@ -46,6 +50,9 @@ class MaybeChannelBound(Object):
     _channel = None
     _is_bound = False
 
+    #: Defines whether maybe_declare can skip declaring this entity twice.
+    can_cache_declaration = False
+
     def __call__(self, channel):
         """`self(channel) -> self.bind(channel)`"""
         return self.bind(channel)
@@ -63,7 +70,7 @@ class MaybeChannelBound(Object):
         return self
 
     def revive(self, channel):
-        """Revive channel afer connection re-established.
+        """Revive channel after the connection has been re-established.
 
         Used by :meth:`~kombu.connection.BrokerConnection.ensure`.
 

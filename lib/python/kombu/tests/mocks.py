@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 from itertools import count
 
 import anyjson
@@ -17,11 +19,12 @@ class Message(base.Message):
         return super(Message, self).decode()
 
 
-class Channel(object):
+class Channel(base.StdChannel):
     open = True
     throw_decode_error = False
 
-    def __init__(self):
+    def __init__(self, connection):
+        self.connection = connection
         self.called = []
         self.deliveries = count(1).next
         self.to_deliver = []
@@ -93,7 +96,7 @@ class Channel(object):
 
     def message_to_python(self, message, *args, **kwargs):
         self._called("message_to_python")
-        return Message(self, body=anyjson.serialize(message),
+        return Message(self, body=anyjson.dumps(message),
                 delivery_tag=self.deliveries(),
                 throw_decode_error=self.throw_decode_error,
                 content_type="application/json", content_encoding="utf-8")
@@ -114,14 +117,17 @@ class Channel(object):
 class Connection(object):
     connected = True
 
+    def __init__(self, client):
+        self.client = client
+
     def channel(self):
-        return Channel()
+        return Channel(self)
 
 
 class Transport(base.Transport):
 
     def establish_connection(self):
-        return Connection()
+        return Connection(self.client)
 
     def create_channel(self, connection):
         return connection.channel()

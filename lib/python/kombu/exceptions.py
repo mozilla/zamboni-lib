@@ -4,10 +4,20 @@ kombu.exceptions
 
 Exceptions.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+
+import socket
+
+__all__ = ["NotBoundError", "MessageStateError", "TimeoutError",
+           "LimitExceeded", "ConnectionLimitExceeded",
+           "ChannelLimitExceeded", "StdChannelError", "VersionMismatch",
+           "SerializerNotInstalled"]
+
+TimeoutError = socket.timeout
 
 
 class NotBoundError(Exception):
@@ -17,11 +27,6 @@ class NotBoundError(Exception):
 
 class MessageStateError(Exception):
     """The message has already been acknowledged."""
-    pass
-
-
-class TimeoutError(Exception):
-    """Operation timed out."""
     pass
 
 
@@ -36,7 +41,7 @@ class ConnectionLimitExceeded(LimitExceeded):
 
 
 class ChannelLimitExceeded(LimitExceeded):
-    """Maximum number of simultaenous channels exceeded."""
+    """Maximum number of simultaneous channels exceeded."""
     pass
 
 
@@ -45,4 +50,9 @@ class StdChannelError(Exception):
 
 
 class VersionMismatch(Exception):
+    pass
+
+
+class SerializerNotInstalled(StandardError):
+    """Support for the requested serialization type is not installed"""
     pass

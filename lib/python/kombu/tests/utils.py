@@ -1,19 +1,55 @@
+from __future__ import absolute_import
+
 import __builtin__
 import os
 import sys
 import types
 
+from functools import wraps
 from StringIO import StringIO
 
-from nose import SkipTest
+import mock
 
-from kombu.utils.functional import wraps
+from nose import SkipTest
 
 try:
     import unittest
     unittest.skip
 except AttributeError:
     import unittest2 as unittest  # noqa
+
+
+class TestCase(unittest.TestCase):
+
+    if not hasattr(unittest.TestCase, "assertItemsEqual"):
+        assertItemsEqual = unittest.TestCase.assertSameElements
+
+
+class Mock(mock.Mock):
+
+    def __init__(self, *args, **kwargs):
+        attrs = kwargs.pop("attrs", None) or {}
+        super(Mock, self).__init__(*args, **kwargs)
+        for attr_name, attr_value in attrs.items():
+            setattr(self, attr_name, attr_value)
+
+
+class ContextMock(Mock):
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        pass
+
+
+class MockPool(object):
+
+    def __init__(self, value=None):
+        self.value = value or ContextMock()
+
+    def acquire(self, **kwargs):
+        return self.value
 
 
 def redirect_stdouts(fun):
@@ -107,6 +143,35 @@ def skip_if_environ(env_var_name):
 
         return _skips_if_environ
 
+    return _wrap_test
+
+
+def skip_if_module(module):
+    def _wrap_test(fun):
+        @wraps(fun)
+        def _skip_if_module(*args, **kwargs):
+            try:
+                __import__(module)
+                raise SkipTest("SKIP %s: %s available\n" % (
+                    fun.__name__, module))
+            except ImportError:
+                pass
+            return fun(*args, **kwargs)
+        return _skip_if_module
+    return _wrap_test
+
+
+def skip_if_not_module(module):
+    def _wrap_test(fun):
+        @wraps(fun)
+        def _skip_if_not_module(*args, **kwargs):
+            try:
+                __import__(module)
+            except ImportError:
+                raise SkipTest("SKIP %s: %s available\n" % (
+                    fun.__name__, module))
+            return fun(*args, **kwargs)
+        return _skip_if_not_module
     return _wrap_test
 
 

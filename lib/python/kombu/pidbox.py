@@ -4,19 +4,22 @@ kombu.pidbox
 
 Generic process mailbox.
 
-:copyright: (c) 2009 - 2011 by Ask Solem.
+:copyright: (c) 2009 - 2012 by Ask Solem.
 :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
 
 import socket
 
 from copy import copy
 from itertools import count
 
-from kombu.entity import Exchange, Queue
-from kombu.messaging import Consumer, Producer
-from kombu.utils import gen_unique_id, kwdict
+from .entity import Exchange, Queue
+from .messaging import Consumer, Producer
+from .utils import kwdict, uuid
+
+__all__ = ["Node", "Mailbox"]
 
 
 class Node(object):
@@ -205,14 +208,14 @@ class Mailbox(object):
     def _broadcast(self, command, arguments=None, destination=None,
             reply=False, timeout=1, limit=None, callback=None, channel=None):
         arguments = arguments or {}
-        reply_ticket = reply and gen_unique_id() or None
+        reply_ticket = reply and uuid() or None
 
         if destination is not None and \
                 not isinstance(destination, (list, tuple)):
             raise ValueError("destination must be a list/tuple not %s" % (
                     type(destination)))
 
-        # Set reply limit to number of destinations (if specificed)
+        # Set reply limit to number of destinations (if specified)
         if limit is None and destination:
             limit = destination and len(destination) or None
 
@@ -253,6 +256,7 @@ class Mailbox(object):
                     self.connection.drain_events(timeout=timeout)
                 except socket.timeout:
                     break
+            chan.after_reply_message_received(queue.name)
             return responses
         finally:
             channel or chan.close()

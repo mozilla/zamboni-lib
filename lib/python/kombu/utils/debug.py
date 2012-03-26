@@ -1,17 +1,34 @@
+"""
+kombu.utils.debug
+=================
+
+Debugging support.
+
+:copyright: (c) 2009 - 2012 by Ask Solem.
+:license: BSD, see LICENSE for more details.
+
+"""
+from __future__ import absolute_import
+
 import logging
 
-from kombu.utils.functional import wraps
-from kombu.utils.log import get_logger
+from functools import wraps
+
+from ..log import get_logger
+
+__all__ = ["setup_logging", "Logwrapped"]
 
 
-def setup_logging(loglevel=logging.DEBUG):
-    root = logging.getLogger()
-    if not root.handlers:
-        root.addHandler(logging.StreamHandler())
-    root.setLevel(loglevel)
+def setup_logging(loglevel=logging.DEBUG, loggers=["kombu.connection",
+                                                   "kombu.channel"]):
+    for logger in loggers:
+        l = get_logger(logger)
+        l.addHandler(logging.StreamHandler())
+        l.setLevel(loglevel)
 
 
 class Logwrapped(object):
+    __ignore = ("__enter__", "__exit__")
 
     def __init__(self, instance, logger=None, ident=None):
         self.instance = instance
@@ -21,7 +38,7 @@ class Logwrapped(object):
     def __getattr__(self, key):
         meth = getattr(self.instance, key)
 
-        if not callable(meth):
+        if not callable(meth) or key in self.__ignore:
             return meth
 
         @wraps(meth)

@@ -1,8 +1,8 @@
+from __future__ import absolute_import
+
 import logging
-from celery.tests.utils import unittest
 
 from datetime import datetime, timedelta
-
 from nose import SkipTest
 
 from celery import beat
@@ -10,7 +10,8 @@ from celery import registry
 from celery.result import AsyncResult
 from celery.schedules import schedule
 from celery.task.base import Task
-from celery.utils import gen_unique_id
+from celery.utils import uuid
+from celery.tests.utils import Case
 
 
 class Object(object):
@@ -42,7 +43,7 @@ class MockService(object):
         self.stopped = True
 
 
-class test_ScheduleEntry(unittest.TestCase):
+class test_ScheduleEntry(Case):
     Entry = beat.ScheduleEntry
 
     def create_entry(self, **kwargs):
@@ -104,7 +105,7 @@ class MockLogger(logging.Logger):
         logging.Logger.__init__(self, *args, **kwargs)
 
     def _log(self, level, msg, args, **kwargs):
-        self.logged.append((level, msg))
+        self.logged.append((level, msg, args, kwargs))
 
 
 class mScheduler(beat.Scheduler):
@@ -119,7 +120,7 @@ class mScheduler(beat.Scheduler):
                           "args": args,
                           "kwargs": kwargs,
                           "options": options})
-        return AsyncResult(gen_unique_id())
+        return AsyncResult(uuid())
 
 
 class mSchedulerSchedulingError(mScheduler):
@@ -149,7 +150,7 @@ always_due = mocked_schedule(True, 1)
 always_pending = mocked_schedule(False, 1)
 
 
-class test_Scheduler(unittest.TestCase):
+class test_Scheduler(Case):
 
     def test_custom_schedule_dict(self):
         custom = {"foo": "bar"}
@@ -189,9 +190,10 @@ class test_Scheduler(unittest.TestCase):
                       schedule=always_due)
         self.assertEqual(scheduler.tick(), 1)
         self.assertTrue(scheduler.logger.logged[0])
-        level, msg = scheduler.logger.logged[0]
+        level, msg, args, kwargs = scheduler.logger.logged[0]
         self.assertEqual(level, logging.ERROR)
-        self.assertIn("Couldn't apply scheduled task", msg)
+        self.assertIn("Couldn't apply scheduled task",
+                      repr(args[0].args[0]))
 
     def test_due_tick_RuntimeError(self):
         scheduler = mSchedulerRuntimeError()
@@ -247,7 +249,7 @@ class test_Scheduler(unittest.TestCase):
         self.assertEqual(a.schedule["bar"].schedule._next_run_at, 40)
 
 
-class test_Service(unittest.TestCase):
+class test_Service(Case):
 
     def get_service(self):
         sh = MockShelve()
@@ -262,7 +264,7 @@ class test_Service(unittest.TestCase):
                 if self.tick_raises_exit:
                     raise SystemExit()
                 if self.shutdown_service:
-                    self.shutdown_service._shutdown.set()
+                    self.shutdown_service._is_shutdown.set()
                 return 0.0
 
         return beat.Service(scheduler_cls=PersistentScheduler), sh
@@ -279,12 +281,12 @@ class test_Service(unittest.TestCase):
         s.sync()
         self.assertTrue(sh.closed)
         self.assertTrue(sh.synced)
-        self.assertTrue(s._stopped.isSet())
+        self.assertTrue(s._is_stopped.isSet())
         s.sync()
         s.stop(wait=False)
-        self.assertTrue(s._shutdown.isSet())
+        self.assertTrue(s._is_shutdown.isSet())
         s.stop(wait=True)
-        self.assertTrue(s._shutdown.isSet())
+        self.assertTrue(s._is_shutdown.isSet())
 
         p = s.scheduler._store
         s.scheduler._store = None
@@ -295,28 +297,28 @@ class test_Service(unittest.TestCase):
 
     def test_start_embedded_process(self):
         s, sh = self.get_service()
-        s._shutdown.set()
+        s._is_shutdown.set()
         s.start(embedded_process=True)
 
     def test_start_thread(self):
         s, sh = self.get_service()
-        s._shutdown.set()
+        s._is_shutdown.set()
         s.start(embedded_process=False)
 
     def test_start_tick_raises_exit_error(self):
         s, sh = self.get_service()
         s.scheduler.tick_raises_exit = True
         s.start()
-        self.assertTrue(s._shutdown.isSet())
+        self.assertTrue(s._is_shutdown.isSet())
 
     def test_start_manages_one_tick_before_shutdown(self):
         s, sh = self.get_service()
         s.scheduler.shutdown_service = s
         s.start()
-        self.assertTrue(s._shutdown.isSet())
+        self.assertTrue(s._is_shutdown.isSet())
 
 
-class test_EmbeddedService(unittest.TestCase):
+class test_EmbeddedService(Case):
 
     def test_start_stop_process(self):
         try:

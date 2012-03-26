@@ -1,34 +1,22 @@
-import warnings
+# -*- coding: utf-8 -*-
+"""
+    celery.task.sets
+    ~~~~~~~~~~~~~~~~
 
-from kombu.utils import cached_property
+    Creating and applying groups of tasks.
 
-from celery import registry
-from celery.app import app_or_default
-from celery.datastructures import AttributeDict
-from celery.utils import gen_unique_id
-from celery.utils.compat import UserList
-
-TASKSET_DEPRECATION_TEXT = """\
-Using this invocation of TaskSet is deprecated and will be removed
-in Celery v2.4!
-
-TaskSets now supports multiple types of tasks, the API has to reflect
-this so the syntax has been changed to:
-
-    from celery.task.sets import TaskSet
-
-    ts = TaskSet(tasks=[
-            %(cls)s.subtask(args1, kwargs1, options1),
-            %(cls)s.subtask(args2, kwargs2, options2),
-            ...
-            %(cls)s.subtask(argsN, kwargsN, optionsN),
-    ])
-
-    result = ts.apply_async()
-
-Thank you for your patience!
+    :copyright: (c) 2009 - 2012 by Ask Solem.
+    :license: BSD, see LICENSE for more details.
 
 """
+from __future__ import absolute_import
+from __future__ import with_statement
+
+from .. import registry
+from ..app import app_or_default
+from ..datastructures import AttributeDict
+from ..utils import cached_property, reprcall, uuid
+from ..utils.compat import UserList
 
 
 class subtask(AttributeDict):
@@ -41,8 +29,7 @@ class subtask(AttributeDict):
     :param task: Either a task class/instance, or the name of a task.
     :keyword args: Positional arguments to apply.
     :keyword kwargs: Keyword arguments to apply.
-    :keyword options: Additional options to
-      :func:`celery.execute.apply_async`.
+    :keyword options: Additional options to :meth:`Task.apply_async`.
 
     Note that if the first argument is a :class:`dict`, the other
     arguments will be ignored and the values in the dict will be used
@@ -90,22 +77,23 @@ class subtask(AttributeDict):
         options = dict(self.options, **options)
         return self.type.apply_async(args, kwargs, **options)
 
-    def get_type(self):
-        return self.type
-
     def __reduce__(self):
         # for serialization, the task type is lazily loaded,
         # and not stored in the dict itself.
         return (self.__class__, (dict(self), ), None)
 
-    def __repr__(self, kwformat=lambda i: "%s=%r" % i, sep=', '):
-        kw = self["kwargs"]
-        return "%s(%s%s%s)" % (self["task"], sep.join(map(repr, self["args"])),
-                kw and sep or "", sep.join(map(kwformat, kw.iteritems())))
+    def __repr__(self):
+        return reprcall(self["task"], self["args"], self["kwargs"])
 
     @cached_property
     def type(self):
         return registry.tasks[self.task]
+
+
+def maybe_subtask(t):
+    if not isinstance(t, subtask):
+        return subtask(t)
+    return t
 
 
 class TaskSet(UserList):
@@ -122,54 +110,33 @@ class TaskSet(UserList):
         >>> list_of_return_values = taskset_result.join()  # *expensive*
 
     """
-    _task = None                # compat
-    _task_name = None           # compat
-
     #: Total number of subtasks in this set.
     total = None
 
-    def __init__(self, task=None, tasks=None, app=None, Publisher=None):
+    def __init__(self, tasks=None, app=None, Publisher=None):
         self.app = app_or_default(app)
-        if task is not None:
-            if hasattr(task, "__iter__"):
-                tasks = task
-            else:
-                # Previously TaskSet only supported applying one kind of task.
-                # the signature then was TaskSet(task, arglist),
-                # so convert the arguments to subtasks'.
-                tasks = [subtask(task, *arglist) for arglist in tasks]
-                task = self._task = registry.tasks[task.name]
-                self._task_name = task.name
-                warnings.warn(TASKSET_DEPRECATION_TEXT % {
-                                "cls": task.__class__.__name__},
-                              DeprecationWarning)
-        self.data = list(tasks or [])
+        self.data = [maybe_subtask(t) for t in tasks or []]
         self.total = len(self.tasks)
         self.Publisher = Publisher or self.app.amqp.TaskPublisher
 
     def apply_async(self, connection=None, connect_timeout=None,
             publisher=None, taskset_id=None):
         """Apply taskset."""
-        return self.app.with_default_connection(self._apply_async)(
-                    connection=connection,
-                    connect_timeout=connect_timeout,
-                    publisher=publisher,
-                    taskset_id=taskset_id)
+        app = self.app
 
-    def _apply_async(self, connection=None, connect_timeout=None,
-            publisher=None, taskset_id=None):
-        if self.app.conf.CELERY_ALWAYS_EAGER:
+        if app.conf.CELERY_ALWAYS_EAGER:
             return self.apply(taskset_id=taskset_id)
 
-        setid = taskset_id or gen_unique_id()
-        pub = publisher or self.Publisher(connection=connection)
-        try:
-            results = self._async_results(setid, pub)
-        finally:
-            if not publisher:  # created by us.
-                pub.close()
+        with app.default_connection(connection, connect_timeout) as conn:
+            setid = taskset_id or uuid()
+            pub = publisher or self.Publisher(connection=conn)
+            try:
+                results = self._async_results(setid, pub)
+            finally:
+                if not publisher:  # created by us.
+                    pub.close()
 
-        return self.app.TaskSetResult(setid, results)
+            return app.TaskSetResult(setid, results)
 
     def _async_results(self, taskset_id, publisher):
         return [task.apply_async(taskset_id=taskset_id, publisher=publisher)
@@ -177,26 +144,16 @@ class TaskSet(UserList):
 
     def apply(self, taskset_id=None):
         """Applies the taskset locally by blocking until all tasks return."""
-        setid = taskset_id or gen_unique_id()
+        setid = taskset_id or uuid()
         return self.app.TaskSetResult(setid, self._sync_results(setid))
 
     def _sync_results(self, taskset_id):
         return [task.apply(taskset_id=taskset_id) for task in self.tasks]
 
-    @property
-    def tasks(self):
+    def _get_tasks(self):
         return self.data
 
-    @property
-    def task(self):
-        warnings.warn(
-            "TaskSet.task is deprecated and will be removed in 1.4",
-            DeprecationWarning)
-        return self._task
-
-    @property
-    def task_name(self):
-        warnings.warn(
-            "TaskSet.task_name is deprecated and will be removed in 1.4",
-            DeprecationWarning)
-        return self._task_name
+    def _set_tasks(self, tasks):
+        self.data = tasks
+    tasks = property(_get_tasks, _set_tasks)
+group = TaskSet
