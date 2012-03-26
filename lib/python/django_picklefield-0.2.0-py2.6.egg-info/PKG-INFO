@@ -1,6 +1,6 @@
 Metadata-Version: 1.0
 Name: django-picklefield
-Version: 0.1.9
+Version: 0.2.0
 Summary: Pickled object field for Django
 Home-page: http://github.com/gintas/django-picklefield
 Author: Gintautas Miliauskas
@@ -121,6 +121,12 @@ Description: -----
         -------
         Changes
         -------
+        
+        Changes in version 0.2.0
+        ========================
+        
+         * Allow pickling of subclasses of django.db.models.Model (thanks to Simon
+           Charette)
         
         Changes in version 0.1.9
         ========================
