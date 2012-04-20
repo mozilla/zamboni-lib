@@ -1,0 +1,9 @@
+#!/home/clouserw/.virtualenvs/zamboni/bin/python2.6
+# EASY-INSTALL-ENTRY-SCRIPT: 'raven==1.7.2','console_scripts','raven'
+__requires__ = 'raven==1.7.2'
+import sys
+from pkg_resources import load_entry_point
+
+sys.exit(
+   load_entry_point('raven==1.7.2', 'console_scripts', 'raven')()
+)
