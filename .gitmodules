@@ -175,3 +175,6 @@
 [submodule "src/PyBrowserID"]
 	path = src/PyBrowserID
 	url = git://github.com/mozilla/PyBrowserID.git
+[submodule "src/trunion"]
+	path = src/trunion
+	url = git://github.com/rtilder/trunion.git
