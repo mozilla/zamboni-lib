@@ -40,10 +40,12 @@ src/jingo
 src/jingo-minify
 src/jstestnetlib
 src/nuggets
+src/PyBrowserID
 src/python-oauth2
 src/pymongo
 src/pyjwt
 src/redis
+src/requests
 src/schematic
 src/statsd
 src/test-utils

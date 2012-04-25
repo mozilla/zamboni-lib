@@ -169,3 +169,9 @@
 [submodule "src/addon-sdk-docs-1.6"]
 	path = src/addon-sdk-docs-1.6
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/requests"]
+	path = src/requests
+	url = git://github.com/kennethreitz/requests.git
+[submodule "src/PyBrowserID"]
+	path = src/PyBrowserID
+	url = git://github.com/mozilla/PyBrowserID.git
