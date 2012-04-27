@@ -45,6 +45,7 @@ src/python-oauth2
 src/pymongo
 src/pyjwt
 src/redis
+src/receipts
 src/requests
 src/schematic
 src/statsd
