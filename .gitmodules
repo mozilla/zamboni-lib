@@ -124,9 +124,6 @@
 [submodule "src/django-mozilla-product-details"]
 	path = src/django-mozilla-product-details
 	url = git://github.com/andymckay/django-mozilla-product-details.git
-[submodule "src/django-arecibo"]
-	path = src/django-arecibo
-	url = git://github.com/andymckay/django-arecibo.git
 [submodule "src/pyjwt"]
 	path = src/pyjwt
 	url = git://github.com/michaelrhanson/pyjwt.git
