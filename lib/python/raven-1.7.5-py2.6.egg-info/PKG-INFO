@@ -1,0 +1,22 @@
+Metadata-Version: 1.0
+Name: raven
+Version: 1.7.5
+Summary: Raven is a client for Sentry
+Home-page: http://github.com/dcramer/raven
+Author: David Cramer
+Author-email: dcramer@gmail.com
+License: UNKNOWN
+Description: 
+        Raven
+        ======
+        
+        Raven is a Python client for `Sentry <http://aboutsentry.com/>`_. It provides
+        full out-of-the-box support for many of the popular frameworks, including
+        Django, and Flask. Raven also includes drop-in support for any WSGI-compatible
+        web application.
+        
+Platform: UNKNOWN
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: System Administrators
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Software Development

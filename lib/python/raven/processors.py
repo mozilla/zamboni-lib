@@ -6,6 +6,7 @@ raven.core.processors
 :license: BSD, see LICENSE for more details.
 """
 
+import re
 
 from raven.utils import varmap
 
@@ -30,7 +31,7 @@ class RemovePostDataProcessor(Processor):
     """
     def process(self, data, **kwargs):
         if 'sentry.interfaces.Http' in data:
-            data['sentry.interfaces.Http'].pop('body', None)
+            data['sentry.interfaces.Http'].pop('data', None)
 
         return data
 
@@ -53,16 +54,24 @@ class SanitizePasswordsProcessor(Processor):
     and basic extra data.
     """
     MASK = '*' * 8
+    FIELDS = frozenset(['password', 'secret', 'passwd'])
+    VALUES_RE = re.compile(r'^\d{16}$')
 
     def sanitize(self, key, value):
+        if value is None:
+            return
+
+        if isinstance(value, basestring) and self.VALUES_RE.match(value):
+            return self.MASK
+
         if not key:  # key can be a NoneType
             return value
 
         key = key.lower()
-        if 'password' in key or 'secret' in key:
-            # store mask as a fixed length for security
-            return self.MASK
-
+        for field in self.FIELDS:
+            if field in key:
+                # store mask as a fixed length for security
+                return self.MASK
         return value
 
     def filter_stacktrace(self, data):
@@ -74,7 +83,7 @@ class SanitizePasswordsProcessor(Processor):
             frame['vars'] = varmap(self.sanitize, frame['vars'])
 
     def filter_http(self, data):
-        for n in ('body', 'cookies', 'headers', 'env', 'querystring'):
+        for n in ('data', 'cookies', 'headers', 'env', 'query_string'):
             if n not in data:
                 continue
 
