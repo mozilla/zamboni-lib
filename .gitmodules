@@ -175,3 +175,6 @@
 [submodule "src/receipts"]
 	path = src/receipts
 	url = git://github.com/andymckay/receipts.git
+[submodule "src/addon-sdk-docs-1.7"]
+	path = src/addon-sdk-docs-1.7
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
