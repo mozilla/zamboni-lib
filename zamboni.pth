@@ -30,6 +30,7 @@ src/django-radagast
 src/django-recaptcha
 src/django-statsd
 src/django-tables
+src/django-tastypie
 src/django-waffle
 src/easy-thumbnails
 src/elasticutils
