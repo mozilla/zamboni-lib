@@ -180,4 +180,4 @@
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
 [submodule "src/django-tastypie"]
 	path = src/django-tastypie
-        url = git://github.com/toastdriven/django-tastypie.git
+	url = git://github.com/toastdriven/django-tastypie.git
