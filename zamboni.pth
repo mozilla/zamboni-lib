@@ -5,6 +5,7 @@ src/cache-panel
 src/check
 src/commonware
 src/django
+src/django_appcache
 src/django-arecibo
 src/django-browserid
 src/django-cache-machine

@@ -181,3 +181,6 @@
 [submodule "src/django-tastypie"]
 	path = src/django-tastypie
 	url = git://github.com/toastdriven/django-tastypie.git
+[submodule "src/django_appcache"]
+	path = src/django_appcache
+	url = git://github.com/kumar303/django_appcache.git
