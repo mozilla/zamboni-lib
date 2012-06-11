@@ -1,3 +1,0 @@
-[console_scripts]
-raven = raven.scripts.runner:main
-
