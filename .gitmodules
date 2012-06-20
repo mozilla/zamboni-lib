@@ -187,3 +187,6 @@
 [submodule "js/receiptverifier"]
 	path = js/receiptverifier
 	url = git://github.com/mozilla/receiptverifier.git
+[submodule "src/addon-sdk-docs-1.8"]
+	path = src/addon-sdk-docs-1.8
+	url = git://github.com/mozilla/addon-sdk-sdocs.git
