@@ -184,3 +184,6 @@
 [submodule "src/django_appcache"]
 	path = src/django_appcache
 	url = git://github.com/kumar303/django_appcache.git
+[submodule "js/receiptverifier"]
+	path = js/receiptverifier
+	url = git://github.com/mozilla/receiptverifier.git
