@@ -50,6 +50,7 @@ src/redis
 src/receipts
 src/requests
 src/schematic
+src/seclusion
 src/statsd
 src/test-utils
 src/tower
