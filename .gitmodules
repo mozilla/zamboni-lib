@@ -190,3 +190,6 @@
 [submodule "src/addon-sdk-docs-1.8"]
 	path = src/addon-sdk-docs-1.8
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/seclusion"]
+	path = src/seclusion
+	url = git://github.com/mozilla/seclusion.git
