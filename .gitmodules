@@ -190,3 +190,6 @@
 [submodule "src/addon-sdk-docs-1.8"]
 	path = src/addon-sdk-docs-1.8
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
+[submodule "src/moz_inapp_pay"]
+	path = src/moz_inapp_pay
+	url = git://github.com/kumar303/moz_inapp_pay.git
