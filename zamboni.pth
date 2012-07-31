@@ -41,6 +41,7 @@ src/hera
 src/jingo
 src/jingo-minify
 src/jstestnetlib
+src/moz_inapp_pay
 src/nuggets
 src/PyBrowserID
 src/python-oauth2
