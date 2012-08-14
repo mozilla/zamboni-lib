@@ -1,5 +1,6 @@
 src/addon-packager
 src/amo-validator
+src/app-validator
 src/bleach
 src/cache-panel
 src/check
