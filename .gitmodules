@@ -199,3 +199,6 @@
 [submodule "src/app-validator"]
 	path = src/app-validator
 	url = git://github.com/mozilla/app-validator.git
+[submodule "src/django-memcached-pool"]
+	path = src/django-memcached-pool
+	url = git://github.com/mozilla/django-memcached-pool.git
