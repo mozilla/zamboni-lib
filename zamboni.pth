@@ -17,6 +17,7 @@ src/django-delayed-mailer
 src/django-devserver
 src/django-extensions
 src/django-fixture-magic
+src/django-memcached-pool
 src/django-mobility
 src/django-mozilla-product-details
 src/django-multidb-router
