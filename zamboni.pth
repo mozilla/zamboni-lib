@@ -3,6 +3,7 @@ src/amo-validator
 src/app-validator
 src/bleach
 src/cache-panel
+src/celery-tasktree
 src/check
 src/commonware
 src/django

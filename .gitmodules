@@ -202,3 +202,6 @@
 [submodule "src/django-memcached-pool"]
 	path = src/django-memcached-pool
 	url = git://github.com/mozilla/django-memcached-pool.git
+[submodule "src/celery-tasktree"]
+	path = src/celery-tasktree
+	url = git://github.com/NetAngels/celery-tasktree.git
