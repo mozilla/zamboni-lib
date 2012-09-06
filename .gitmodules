@@ -126,7 +126,7 @@
 	url = git://github.com/andymckay/django-mozilla-product-details.git
 [submodule "src/pyjwt"]
 	path = src/pyjwt
-	url = git://github.com/michaelrhanson/pyjwt.git
+	url = git://github.com/rtilder/pyjwt.git
 [submodule "src/django-radagast"]
 	path = src/django-radagast
 	url = git://github.com/andymckay/django-radagast.git
