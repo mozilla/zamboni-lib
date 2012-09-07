@@ -205,3 +205,6 @@
 [submodule "src/celery-tasktree"]
 	path = src/celery-tasktree
 	url = git://github.com/NetAngels/celery-tasktree.git
+[submodule "src/django-mysql-pymysql"]
+	path = src/django-mysql-pymysql
+	url = https://github.com/clelland/django-mysql-pymysql

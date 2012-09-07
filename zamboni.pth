@@ -23,6 +23,7 @@ src/django-mobility
 src/django-mozilla-product-details
 src/django-multidb-router
 src/django-mysql-pool
+src/django-mysql-pymysql
 src/django-nose
 src/django-piston-oauth2
 src/django-pylibmc
