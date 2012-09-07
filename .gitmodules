@@ -208,3 +208,6 @@
 [submodule "src/django-mysql-pymysql"]
 	path = src/django-mysql-pymysql
 	url = https://github.com/clelland/django-mysql-pymysql
+[submodule "src/PyMySQL"]
+	path = src/PyMySQL
+	url = https://github.com/petehunt/PyMySQL

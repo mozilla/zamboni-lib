@@ -48,6 +48,7 @@ src/jstestnetlib
 src/moz_inapp_pay
 src/nuggets
 src/PyBrowserID
+src/PyMySQL
 src/python-oauth2
 src/pymongo
 src/pyjwt
