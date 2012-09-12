@@ -97,9 +97,9 @@ _CEF_FORMAT = ('%(date)s %(host)s CEF:%(version)s|%(vendor)s|%(product)s|'
                '%(device_version)s|%(signature)s|%(name)s|%(severity)s|'
                'cs1Label=requestClientApplication cs1=%(user_agent)s '
                'requestMethod=%(method)s request=%(url)s '
-               'src=%(source)s dest=%(dest)s suser=%(suser)s')
+               'src=%(source)s dhost=%(dest)s suser=%(suser)s')
 
-_EXTENSIONS = ['cs1Label', 'cs1', 'requestMethod', 'request', 'src', 'dest',
+_EXTENSIONS = ['cs1Label', 'cs1', 'requestMethod', 'request', 'src', 'dhost',
                'suser']
 _PREFIX = re.compile(r'([|\\\r\n])')
 _EXTENSION = re.compile(r'([\\=])')
