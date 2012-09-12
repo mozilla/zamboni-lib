@@ -28,6 +28,11 @@ except:
     import json   # NOQA
 
 
+@timeit
+def timed_add(x, y):
+    return x + y
+
+
 class DecoratorTestBase(object):
     client_name = '_decorator_test'
 
@@ -43,16 +48,40 @@ class DecoratorTestBase(object):
     def tearDown(self):
         del CLIENT_HOLDER._clients[self.client_name]
         CLIENT_HOLDER.set_default_client_name(self.orig_default_client)
+        timed_add._client = None
 
 
 class TestCannedDecorators(DecoratorTestBase):
+    def test_module_scope_multiple1(self):
+        eq_(timed_add(3, 4), 7)
+        msgs = [json.loads(m) for m in self.client.sender.msgs]
+        eq_(len(msgs), 1)
+
+    def test_module_scope_multiple2(self):
+        eq_(timed_add(4, 5), 9)
+        msgs = [json.loads(m) for m in self.client.sender.msgs]
+        eq_(len(msgs), 1)
+
+    def test_passed_decorator_args(self):
+        name = 'different.timer.name'
+
+        @timeit(name)
+        def timed_fn(x, y):
+            return x + y
+
+        eq_(timed_fn(3, 5), 8)
+        msgs = [json.loads(m) for m in self.client.sender.msgs]
+        msg = msgs[-1]
+        eq_(msg['type'], 'timer')
+        eq_(msg['fields']['name'], name)
+
     def test_decorator_ordering(self):
         @incr_count
         @timeit
         def ordering_1(x, y):
             return x + y
 
-        ordering_1(5, 6)
+        eq_(ordering_1(5, 6), 11)
         msgs = [json.loads(m) for m in self.client.sender.msgs]
         eq_(len(msgs), 2)
 
@@ -111,6 +140,33 @@ class TestCannedDecorators(DecoratorTestBase):
         eq_(msgs[1]['type'], 'counter')
 
         self.client.sender.msgs.clear()
+
+    def test_decorating_two_methods(self):
+        class Stub(object):
+
+            def __init__(self, value):
+                self.value = value
+
+            @timeit
+            def get_value1(self):
+                return self.value
+
+            @timeit
+            def get_value2(self):
+                return self.value
+
+        value = 7
+        stub = Stub(value)
+        eq_(stub.get_value1(), value)
+        eq_(stub.get_value2(), value)
+        eq_(stub.get_value1(), value)
+        eq_(stub.get_value2(), value)
+        msgs = [json.loads(m) for m in self.client.sender.msgs]
+        eq_(len(msgs), 4)
+        eq_(msgs[0]['fields']['name'],
+            'metlog.tests.test_decorators.get_value1')
+        eq_(msgs[1]['fields']['name'],
+            'metlog.tests.test_decorators.get_value2')
 
 
 class TestDecoratorArgs(DecoratorTestBase):
