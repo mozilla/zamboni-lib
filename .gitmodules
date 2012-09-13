@@ -16,9 +16,6 @@
 [submodule "src/commonware"]
 	path = src/commonware
 	url = git://github.com/jsocol/commonware.git
-[submodule "src/django"]
-	path = src/django
-	url = git://github.com/django/django
 [submodule "src/django-cache-machine"]
     path = src/django-cache-machine
     url = git://github.com/jbalogh/django-cache-machine.git
