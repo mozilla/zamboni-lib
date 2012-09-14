@@ -97,9 +97,6 @@
 [submodule "src/fastchardet"]
 	path = src/fastchardet
 	url = git://github.com/mattbasta/fastchardet
-[submodule "src/jstestnetlib"]
-	path = src/jstestnetlib
-	url = git://github.com/kumar303/jstestnetlib.git
 [submodule "src/django-quieter-formset"]
 	path = src/django-quieter-formset
 	url = git://github.com/andymckay/django-quieter-formset.git
@@ -172,18 +169,12 @@
 [submodule "src/django-tastypie"]
 	path = src/django-tastypie
 	url = git://github.com/toastdriven/django-tastypie.git
-[submodule "src/django_appcache"]
-	path = src/django_appcache
-	url = git://github.com/kumar303/django_appcache.git
 [submodule "js/receiptverifier"]
 	path = js/receiptverifier
 	url = git://github.com/mozilla/receiptverifier.git
 [submodule "src/addon-sdk-docs-1.8"]
 	path = src/addon-sdk-docs-1.8
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "src/moz_inapp_pay"]
-	path = src/moz_inapp_pay
-	url = git://github.com/kumar303/moz_inapp_pay.git
 [submodule "src/addon-sdk-docs-1.9"]
 	path = src/addon-sdk-docs-1.9
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
