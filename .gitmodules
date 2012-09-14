@@ -1,132 +1,3 @@
-[submodule "src/addon-packager"]
-	path = src/addon-packager
-	url = git://github.com/mattbasta/addon-packager.git
-[submodule "src/amo-validator"]
-	path = src/amo-validator
-	url = git://github.com/mozilla/amo-validator.git
-[submodule "src/bleach"]
-	path = src/bleach
-	url = git://github.com/jsocol/bleach.git
-[submodule "src/cache-panel"]
-	path = src/cache-panel
-	url = git://github.com/jbalogh/django-debug-cache-panel
-[submodule "src/check"]
-	path = src/check
-	url = git://github.com/jbalogh/check.git
-[submodule "src/commonware"]
-	path = src/commonware
-	url = git://github.com/jsocol/commonware.git
-[submodule "src/django-cache-machine"]
-    path = src/django-cache-machine
-    url = git://github.com/jbalogh/django-cache-machine.git
-[submodule "src/django-cronjobs"]
-	path = src/django-cronjobs
-	url = git://github.com/jsocol/django-cronjobs.git
-[submodule "src/django-csp"]
-	path = src/django-csp
-	url = git://github.com/mozilla/django-csp.git
-[submodule "src/django-debug-toolbar"]
-	path = src/django-debug-toolbar
-	url = https://github.com/django-debug-toolbar/django-debug-toolbar.git
-[submodule "src/django-devserver"]
-	path = src/django-devserver
-	url = git://github.com/dcramer/django-devserver.git
-[submodule "src/django-extensions"]
-	path = src/django-extensions
-	url = git://github.com/django-extensions/django-extensions.git
-[submodule "src/django-fixture-magic"]
-	path = src/django-fixture-magic
-	url = git://github.com/davedash/django-fixture-magic.git
-[submodule "src/django-multidb-router"]
-	path = src/django-multidb-router
-	url = git://github.com/jbalogh/django-multidb-router.git
-[submodule "src/django-nose"]
-	path = src/django-nose
-	url = git://github.com/jbalogh/django-nose.git
-[submodule "src/django-queryset-transform"]
-	path = src/django-queryset-transform
-	url = git://github.com/jbalogh/django-queryset-transform.git
-[submodule "src/django-recaptcha"]
-	path = src/django-recaptcha
-	url = git://github.com/mozilla/django-recaptcha.git
-[submodule "src/easy-thumbnails"]
-	path = src/easy-thumbnails
-	url = git://github.com/SmileyChris/easy-thumbnails.git
-[submodule "src/happyforms"]
-	path = src/happyforms
-	url = git://github.com/mozilla/happyforms.git
-[submodule "src/hera"]
-	path = src/hera
-	url = git://github.com/clouserw/hera.git
-[submodule "src/jingo"]
-	path = src/jingo
-	url = git://github.com/jbalogh/jingo.git
-[submodule "src/jingo-minify"]
-	path = src/jingo-minify
-	url = git://github.com/jsocol/jingo-minify.git
-[submodule "src/pymongo"]
-	path = src/pymongo
-	url = git://github.com/mongodb/mongo-python-driver.git
-[submodule "src/python-oauth2"]
-	path = src/python-oauth2
-	url = git://github.com/simplegeo/python-oauth2.git
-[submodule "src/redis"]
-    path = src/redis
-    url = https://github.com/andymccurdy/redis-py
-[submodule "src/schematic"]
-	path = src/schematic
-	url = git://github.com/jbalogh/schematic.git
-[submodule "src/test-utils"]
-	path = src/test-utils
-	url = git://github.com/jbalogh/test-utils.git
-[submodule "src/tower"]
-	path = src/tower
-	url = git://github.com/clouserw/tower.git
-[submodule "src/nuggets"]
-	path = src/nuggets
-	url = git://github.com/mozilla/nuggets.git
-[submodule "src/django-qunit"]
-	path = src/django-qunit
-	url = git://github.com/kumar303/django-qunit.git
-[submodule "src/django-tables"]
-	path = src/django-tables
-	url = git://github.com/miracle2k/django-tables.git
-[submodule "src/django-mobility"]
-	path = src/django-mobility
-	url = git://github.com/jbalogh/django-mobility.git
-[submodule "src/fastchardet"]
-	path = src/fastchardet
-	url = git://github.com/mattbasta/fastchardet
-[submodule "src/jstestnetlib"]
-	path = src/jstestnetlib
-	url = git://github.com/kumar303/jstestnetlib.git
-[submodule "src/django-quieter-formset"]
-	path = src/django-quieter-formset
-	url = git://github.com/andymckay/django-quieter-formset.git
-[submodule "src/django-waffle"]
-	path = src/django-waffle
-	url = https://github.com/washort/django-waffle.git
-[submodule "src/elasticutils"]
-	path = src/elasticutils
-	url = https://github.com/mozilla/elasticutils.git
-[submodule "src/django-piston-oauth2"]
-	path = src/django-piston-oauth2
-	url = git://github.com/andymckay/django-piston-oauth2.git
-[submodule "src/django-ratelimit"]
-	path = src/django-ratelimit
-	url = git://github.com/jsocol/django-ratelimit.git
-[submodule "src/django-mozilla-product-details"]
-	path = src/django-mozilla-product-details
-	url = git://github.com/andymckay/django-mozilla-product-details.git
-[submodule "src/pyjwt"]
-	path = src/pyjwt
-	url = git://github.com/rtilder/pyjwt.git
-[submodule "src/django-radagast"]
-	path = src/django-radagast
-	url = git://github.com/andymckay/django-radagast.git
-[submodule "src/django-pylibmc"]
-	path = src/django-pylibmc
-	url = git://github.com/jbalogh/django-pylibmc.git
 [submodule "src/addon-sdk-docs-1.0"]
 	path = src/addon-sdk-docs-1.0
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
@@ -157,51 +28,15 @@
 [submodule "src/addon-sdk-docs-1.6"]
 	path = src/addon-sdk-docs-1.6
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "src/requests"]
-	path = src/requests
-	url = git://github.com/kennethreitz/requests.git
-[submodule "src/PyBrowserID"]
-	path = src/PyBrowserID
-	url = git://github.com/mozilla/PyBrowserID.git
-[submodule "src/receipts"]
-	path = src/receipts
-	url = git://github.com/andymckay/receipts.git
 [submodule "src/addon-sdk-docs-1.7"]
 	path = src/addon-sdk-docs-1.7
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "src/django-tastypie"]
-	path = src/django-tastypie
-	url = git://github.com/toastdriven/django-tastypie.git
-[submodule "src/django_appcache"]
-	path = src/django_appcache
-	url = git://github.com/kumar303/django_appcache.git
-[submodule "js/receiptverifier"]
-	path = js/receiptverifier
-	url = git://github.com/mozilla/receiptverifier.git
 [submodule "src/addon-sdk-docs-1.8"]
 	path = src/addon-sdk-docs-1.8
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "src/moz_inapp_pay"]
-	path = src/moz_inapp_pay
-	url = git://github.com/kumar303/moz_inapp_pay.git
 [submodule "src/addon-sdk-docs-1.9"]
 	path = src/addon-sdk-docs-1.9
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
-[submodule "src/app-validator"]
-	path = src/app-validator
-	url = git://github.com/mozilla/app-validator.git
-[submodule "src/django-memcached-pool"]
-	path = src/django-memcached-pool
-	url = git://github.com/mozilla/django-memcached-pool.git
-[submodule "src/celery-tasktree"]
-	path = src/celery-tasktree
-	url = git://github.com/NetAngels/celery-tasktree.git
-[submodule "src/django-mysql-pymysql"]
-	path = src/django-mysql-pymysql
-	url = https://github.com/clelland/django-mysql-pymysql
-[submodule "src/PyMySQL"]
-	path = src/PyMySQL
-	url = https://github.com/petehunt/PyMySQL
 [submodule "src/addon-sdk-docs-1.10"]
 	path = src/addon-sdk-docs-1.10
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
