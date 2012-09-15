@@ -100,9 +100,6 @@
 [submodule "src/django-quieter-formset"]
 	path = src/django-quieter-formset
 	url = git://github.com/andymckay/django-quieter-formset.git
-[submodule "src/django-waffle"]
-	path = src/django-waffle
-	url = https://github.com/washort/django-waffle.git
 [submodule "src/elasticutils"]
 	path = src/elasticutils
 	url = https://github.com/mozilla/elasticutils.git
