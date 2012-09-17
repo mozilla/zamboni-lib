@@ -36,4 +36,7 @@
 	url = git://github.com/mozilla/addon-sdk-sdocs.git
 [submodule "src/schematic"]
 	path = src/schematic
-	url = git://github.com/jbalogh/schematic.git
+        url = git://github.com/jbalogh/schematic.git
+[submodule "js/receiptverifier"]
+        path = js/receiptverifier
+        url = git://github.com/mozilla/receiptverifier.git
