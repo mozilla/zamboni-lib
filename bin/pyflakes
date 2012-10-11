@@ -1,4 +1,0 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
-
-from pyflakes.scripts.pyflakes import main
-main()

@@ -1,9 +1,0 @@
-#!/Users/jbalogh/.dotfiles/.virtualenvs/zamboni/bin/python
-# EASY-INSTALL-ENTRY-SCRIPT: 'celery==2.2.6','console_scripts','celerybeat'
-__requires__ = 'celery==2.2.6'
-import sys
-from pkg_resources import load_entry_point
-
-sys.exit(
-   load_entry_point('celery==2.2.6', 'console_scripts', 'celerybeat')()
-)

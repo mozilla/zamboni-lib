@@ -1,4 +1,0 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
-import sys
-from pylint import lint
-lint.Run(sys.argv[1:])

@@ -1,9 +1,0 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
-# EASY-INSTALL-ENTRY-SCRIPT: 'cssutils==0.9.7b3','console_scripts','csscapture'
-__requires__ = 'cssutils==0.9.7b3'
-import sys
-from pkg_resources import load_entry_point
-
-sys.exit(
-   load_entry_point('cssutils==0.9.7b3', 'console_scripts', 'csscapture')()
-)

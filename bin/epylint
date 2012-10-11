@@ -1,3 +1,0 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
-from pylint import epylint
-epylint.Run()

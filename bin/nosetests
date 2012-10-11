@@ -1,9 +1,0 @@
-#!/Users/jeff/.dotfiles/.virtualenvs/newz/bin/python2.6
-# EASY-INSTALL-ENTRY-SCRIPT: 'nose==0.11.1','console_scripts','nosetests'
-__requires__ = 'nose==0.11.1'
-import sys
-from pkg_resources import load_entry_point
-
-sys.exit(
-   load_entry_point('nose==0.11.1', 'console_scripts', 'nosetests')()
-)
