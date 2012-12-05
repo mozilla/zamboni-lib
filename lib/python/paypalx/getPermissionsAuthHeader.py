@@ -1,7 +1,5 @@
-import sys
-import urllib,httplib
 import hashlib,hmac,base64
-import random,md5,time
+import time
 import re
 
 def getSignature(key, sigBase):
